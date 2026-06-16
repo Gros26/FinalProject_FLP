@@ -44,33 +44,52 @@
 ;Especificación Léxica
 
 (define scanner-spec-simple-interpreter
-'((white-sp (whitespace) skip)
-  (comment ("%" (arbno (not #\newline))) skip)
-  (identifier (letter (arbno (or letter digit "?"))) symbol)
-  (number (digit (arbno digit)) number)
-  (number ("-" digit (arbno digit)) number)
-  ;agregado el texto
-  (text (letter (arbno (or letter digit))) symbol)
-  ;agregados flotantes
-  (float (digit "." (arbno digit)) number)
-  (float ("-" digit "." (arbno digit)) number)))
+'((white-sp
+   (whitespace) skip)
+  (comment
+   ("#" (arbno (not #\newline))) skip)
+  (identifier
+   (letter (arbno (or letter digit))) symbol)
+  (number
+   (digit (arbno digit)) number)
+  (number
+   ("-" digit (arbno digit)) number)
+  ;; Números flotantes
+  (number
+   (digit "." (arbno digit)) number)
+  (number
+   ("-" digit "." (arbno digit)) number)
+  ;; Cadenas de caracteres
+  (string-text
+   ("\"" (arbno (not #\")) "\"") string)
+  ;; (string-text (letter (arbno (or letter digit))) symbol)
+  ))
 
 ;Especificación Sintáctica (gramática)
 
 (define grammar-simple-interpreter
   '((program (expression) a-program)
+
+    ;; Datos inmutables
     (expression (identifier) id-exp)
-    ;agregadas las cadenas
-    (expression ("\"" text "\"") cadena)
-    (expression (number) numero)
-    ;Una posible representacion del null
-    (expression ("None") null)
-    ;ligadura de variables
-    (expression ("var" identifier "=" expression ";" expression) var-exp)
-    ;constantes
-    (expression ("const" identifier "=" expression ";") const-exp)
-    ;asignacion, cambiar una variable seria como el set diria yo
-    (expression ("set" identifier "=" expression ";") set-exp)
+    (expression (string-text) cadena-exp)
+    (expression (number) numero-exp)
+    (expression ("true") true-exp)
+    (expression ("false") false-exp)
+    (expression ("null") null-exp)
+
+    ;; Declaraciones secuenciales
+    (expression ("var" (separated-list identifier "=" expression ",") ";" expression) var-exp)
+    ;(expression ("var" (separated-list identifier "=" expression ",") ";") var-exp)
+    ; (expression ("var" identifier "=" expression ";" expression) var-exp)
+    (expression ("const" (separated-list identifier "=" expression ",") ";" expression) const-exp)
+    ;(expression ("const" (separated-list identifier "=" expression ",") ";") const-exp)
+    ;(expression ("const" identifier "=" expression) const-exp)
+    (expression ("set" identifier "=" expression) set-exp)
+
+    (expression ("begin" expression (arbno ";" expression) "end")
+                begin-exp)
+    
     (expression
     (primitive "(" (separated-list expression ",")")")
      primapp-exp)
@@ -84,13 +103,37 @@
                 app-exp)
     (expression ("letrec" (arbno identifier "(" (separated-list identifier ",") ")" "=" expression)  "in" expression) 
                 letrec-exp)
-    (expression ("begin" expression (arbno ";" expression) "end")
-                begin-exp)
+
+    ;; Estructuras de control
+    ;(expression ("if" expression "then" expression "else" expression "end") if-exp)
+    ;(expression ("begin" (separated-list expression ";") "end") begin-exp)
+    ;(expression ("switch" expression "{" (arbno "case" expression ":" expression) "default" ":" expression "}") switch-exp)
+    ;(expression ("while" expression "do" expression "done") while-exp)
+    ;(expression ("for" identifier "in" expression "do" expression "done")for-exp)
+
+    ;; Paradigma funcional
+    ;; Porn ahora, pero falta mejorar la definición de funciones
+    ;(expression ("func" identifier "(" (separated-list identifier ",") ")" "{" expression "}") func-exp)
+    ;(expression ("return" expression) return-exp)
+    ;(expression ("call" "(" expression (arbno "," expression) ")") app-exp)
+
+    ;; Estructuras mutables
+    ; Listas: [1, 2, 3]
+    ;(expression ("[" (separated-list expression ",") "]") list-exp)
+    ; Diccionarios: { "a": 1, "b": 2 }
+    ;(expression ("{" (separated-list identifier ":" expression ",") "}") dict-exp)
+
+
+    ;; Evaluación de expresiones algebraicas
+    (expression ("evaluar" "(" expression "," (separated-list identifier "=" expression ",") ")") eval-exp)
     (primitive ("+") add-prim)
     (primitive ("-") substract-prim)
     (primitive ("*") mult-prim)
+    ;(primitive ("/") div-prim)
     (primitive ("add1") incr-prim)
-    (primitive ("sub1") decr-prim)))
+    (primitive ("sub1") decr-prim)
+    ;(primitive ("simplificar") simplify-prim)
+    ))
 
 
 ;Tipos de datos para la sintaxis abstracta de la gramática
@@ -216,7 +259,8 @@
 
 (define-datatype target target?
   (direct-target (expval expval?))
-  (indirect-target (ref ref-to-direct-target?)))
+  (indirect-target (ref ref-to-direct-target?))
+  (readonly-target (expval expval?)))
 
 (define-datatype reference reference?
   (a-ref (position integer?)
@@ -227,17 +271,30 @@
 (define eval-expression
   (lambda (exp env)
     (cases expression exp
-      (numero (datum) datum)
+      (numero-exp (datum) datum)
       (id-exp (id) (apply-env env id))
-      (cadena (txt) txt)
-      (var-exp (id exp body)
-              (let ((val (eval-expression exp env)))
-                (eval-expression body
-                     (extend-env (list id)
-                                 (list (direct-target val))
-                                 env))))
-      ;por el momento el null lo uso para ver como va mi ambiente
-      (null () env)
+      (cadena-exp (txt) (substring txt 1 (- (string-length txt) 1)))
+
+      (var-exp (ids rhs-exps body)
+               (let ((vals (map (lambda (e) (eval-expression e env)) rhs-exps)))
+                 (eval-expression body
+                                  (extend-env ids (map direct-target vals) env))))
+ 
+      (const-exp (ids rhs-exps body)
+                 (let ((vals (map (lambda (e) (eval-expression e env)) rhs-exps)))
+                   (eval-expression body
+                                    (extend-env ids (map readonly-target vals) env))))
+     
+      (set-exp (id rhs-exp)
+               (let ((val (eval-expression rhs-exp env))
+                     (ref (apply-env-ref env id)))
+                 (setref! ref val)
+                 val))
+
+      (true-exp () #t)
+      (false-exp () #f)
+
+      (null-exp () 'null)
       (primapp-exp (prim rands)
                    (let ((args (eval-primapp-exp-rands rands env)))
                      (apply-primitive prim args)))
@@ -260,12 +317,6 @@
       (letrec-exp (proc-names idss bodies letrec-body)
                   (eval-expression letrec-body
                                    (extend-env-recursively proc-names idss bodies env)))
-      (set-exp (id rhs-exp)
-               (begin
-                 (setref!
-                  (apply-env-ref env id)
-                  (eval-expression rhs-exp env))
-                 1))
       (begin-exp (exp exps)
                  (let loop ((acc (eval-expression exp env))
                              (exps exps))
@@ -290,6 +341,7 @@
                 (let ((ref (apply-env-ref env id)))
                   (cases target (primitive-deref ref)
                     (direct-target (expval) ref)
+                    (readonly-target (expval) ref)
                     (indirect-target (ref1) ref1)))))
       (else
        (direct-target (eval-expression rand env))))))
@@ -320,7 +372,12 @@
 ;true-value?: determina si un valor dado corresponde a un valor booleano falso o verdadero
 (define true-value?
   (lambda (x)
-    (not (zero? x))))
+    (cond
+      ((eqv? x #f) #f)         
+      ((eqv? x 0) #f)           
+      ((equal? x "") #f)        
+      ((eqv? x 'null) #f)      
+      (else #t))))              
 
 ;*******************************************************************************************
 ;Procedimientos
@@ -392,6 +449,7 @@
       ;(display "jajajaj ")
       (deref (apply-env-ref env sym))))
     ;)
+
 (define apply-env-ref
   (lambda (env sym)
     (cases environment env
@@ -409,7 +467,7 @@
 (define expval?
   (lambda (x)
     ;agregado symbol a expval
-    (or (number? x) (procval? x) (symbol? x))))
+    (or (number? x) (procval? x) (symbol? x) (string? x) (boolean? x))))
 
 (define ref-to-direct-target?
   (lambda (x)
@@ -418,15 +476,18 @@
            (a-ref (pos vec)
                   (cases target (vector-ref vec pos)
                     (direct-target (v) #t)
+                    (readonly-target (v) #t)
                     (indirect-target (v) #f)))))))
 
 (define deref
   (lambda (ref)
     (cases target (primitive-deref ref)
       (direct-target (expval) expval)
+      (readonly-target (expval) expval) ; lee el valor igual q direct-target
       (indirect-target (ref1)
                        (cases target (primitive-deref ref1)
                          (direct-target (expval) expval)
+                         (readonly-target (expval) expval)
                          (indirect-target (p)
                                           (eopl:error 'deref
                                                       "Illegal reference: ~s" ref1)))))))
@@ -440,9 +501,16 @@
 (define setref!
   (lambda (ref expval)
     (let
-        ((ref (cases target (primitive-deref ref)
-                (direct-target (expval1) ref)
-                (indirect-target (ref1) ref1))))
+        ((ref
+          (cases target (primitive-deref ref)
+            (direct-target (expval1) ref)
+            (readonly-target (expval1) 
+                             (eopl:error 'setref! "Error: Intento de modificar una constante inmutable."))
+            (indirect-target (ref1)
+                             (cases target (primitive-deref ref1)
+                               (readonly-target (v) 
+                                                (eopl:error 'setref! "Error: Intento de modificar una constante inmutable."))
+                               (else ref1))))))
       (primitive-setref! ref (direct-target expval)))))
 
 (define primitive-setref!
@@ -482,13 +550,13 @@
 just-scan
 scan&parse
 (just-scan "add1(x)")
-(just-scan "add1(   x   )%cccc")
-(just-scan "add1(  +(5, x)   )%cccc")
-(just-scan "add1(  +(5, %ccccc x) ")
+(just-scan "add1(   x   )#cccc")
+(just-scan "add1(  +(5, x)   )#cccc")
+(just-scan "add1(  +(5, #ccccc x) ")
 (scan&parse "add1(x)")
-(scan&parse "add1(   x   )%cccc")
-(scan&parse "add1(  +(5, x)   )%cccc")
-(scan&parse "add1(  +(5, %cccc
+(scan&parse "add1(   x   )#cccc")
+(scan&parse "add1(  +(5, x)   )#cccc")
+(scan&parse "add1(  +(5, #cccc
 x)) ")
 (scan&parse "if -(x,4) then +(y,11) else *(y,10)")
 (scan&parse "let
@@ -499,8 +567,11 @@ x = +(x,2)
 in
 add1(x)")
 
-(define caso1 (primapp-exp (incr-prim) (list (numero 5))))
-(define exp-numero (numero 8))
+(just-scan "add1(  +(5, #esto es un comentario \n x))")
+(scan&parse "add1(  +(5, #esto es un comentario \n x))")
+
+(define caso1 (primapp-exp (incr-prim) (list (numero-exp 5))))
+(define exp-numero (numero-exp 8))
 (define exp-ident (id-exp 'c))
 (define exp-app (primapp-exp (add-prim) (list exp-numero exp-ident)))
 (define programa (a-program exp-app))
@@ -509,8 +580,16 @@ add1(x)")
                                                               (list (id-exp 'v)
                                                                     (id-exp 'y)))
                                                  (id-exp 'x)
-                                                 (numero 200))))
+                                                 (numero-exp 200))))
 (define un-programa-dificil
     (a-program una-expresion-dificil))
 
 (interpretador)
+
+; var abc = 42;
+;begin
+;  set abc = "Ahora soy un texto";
+;  set abc = 20;
+;  abc
+;end
+
