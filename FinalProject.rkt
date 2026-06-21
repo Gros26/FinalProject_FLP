@@ -6,37 +6,44 @@
 
 ;; La definición BNF para las expresiones del lenguaje:
 ;;
-;;  <program>       ::= <expression>
-;;                      <a-program (exp)>
+;;  <program>       ::= <expression> {<expression>]* end
+;;                      <a-program (exp exps)>
 ;;  <expression>    ::= <identifier>
 ;;                      id-exp (id)
 ;;                  ::= "<text>"
 ;;                      cadena (text)
 ;;                  ::= <number>
 ;;                      numero (datum)
+;;                  ::= <bool>
+;;                      numero (datum)
 ;;                  ::= None
 ;;                      null ()
-;;                  ::= var <identifier> = <expression>; <expression>
-;;                      var-exp (id exp body)
+;;                  ::= var <identifier> = <expression> {<identifier> = <expression>}*(,);
+;;                      var-exp (id exp)
 ;;                  ::= const <identifier> = <expression>;
 ;;                      const-exp (id exp)
-;;                  ::= <primitive> ({<expression>}*(,))
-;;                      <primapp-exp (prim rands)>
+;;                  ::= (<expression> <primitive-bin> <expression>)
+;;                      <primapp-bin-exp (rand1 prim rand2)>
+;;                  ::= <primitive-uni> (<expression>)
+;;                      <primapp-un-exp (prim rand)>
 ;;                  ::= if <expresion> then <expresion> else <expression>
 ;;                      <if-exp (exp1 exp2 exp23)>
 ;;                  ::= let {<identifier> = <expression>}* in <expression>
 ;;                      <let-exp (ids rands body)>
-;;                  ::= proc({<identificador>}*(,)) <expression>
+;;                  ::= func({<identificador>}*(,)) <expression>
 ;;                      <proc-exp (ids body)>
-;;                  ::= (<expression> {<expression>}*)
-;;                      <app-exp proc rands>
-;;                  ::= letrec  {identifier ({identifier}*(,)) = <expression>}* in <expression>
-;;                     <letrec-exp(proc-names idss bodies bodyletrec)>
+;;                  ::= <expression> ({<expression>}*)
+;;                      <app-exp (proc rands)>
 ;;                  ::= begin <expression> {; <expression>}* end
 ;;                     <begin-exp (exp exps)>
 ;;                  ::= set <identifier> = <expression>
 ;;                     <set-exp (id rhsexp)>
-;;  <primitive>     ::= + | - | * | add1 | sub1 
+;;  <primitive>     ::= + | - | * | add1 | sub1
+;;  <bool>          ::= (<bool> <prim-comp> <bool>)
+;;                  ::= (<bool> <op-bin-bool> <bool>)
+;;                  ::= (<op-un-bool> <bool>)
+;;                  ::= true | false
+
 
 ;******************************************************************************************
 
@@ -68,8 +75,7 @@
 ;Especificación Sintáctica (gramática)
 
 (define grammar-simple-interpreter
-  '((program (expression) a-program)
-
+  '((program (expression (arbno expression) "end") a-program)
     ;; Datos inmutables
     (expression (identifier) id-exp)
     (expression (string-text) cadena-exp)
@@ -79,27 +85,23 @@
     (expression ("null") null-exp)
 
     ;; Declaraciones secuenciales
-    (expression ("var" (separated-list identifier "=" expression ",") ";" expression) var-exp)
-    ;(expression ("var" (separated-list identifier "=" expression ",") ";") var-exp)
-    ; (expression ("var" identifier "=" expression ";" expression) var-exp)
-    (expression ("const" (separated-list identifier "=" expression ",") ";" expression) const-exp)
-    ;(expression ("const" (separated-list identifier "=" expression ",") ";") const-exp)
-    ;(expression ("const" identifier "=" expression) const-exp)
-    (expression ("set" identifier "=" expression) set-exp)
-
+    
+    (expression ("var" (separated-list identifier "=" expression ",")";") var-exp)
+    (expression ("const" (separated-list identifier "=" expression ",")";") const-exp)
+    (expression ("set" identifier "=" expression ";") set-exp)
     (expression ("begin" expression (arbno ";" expression) "end")
                 begin-exp)
-    
-    (expression
-    (primitive "(" (separated-list expression ",")")")
-     primapp-exp)
+    (expression ("(" expression primitive-bin expression ")")
+                primapp-bin-exp)
+    (expression (primitive-un  "(" expression ")")
+                primapp-un-exp)
     (expression ("if" expression "then" expression "else" expression)
                 if-exp)
     (expression ("let" (arbno identifier "=" expression) "in" expression)
                 let-exp)
-    (expression ("proc" "(" (arbno identifier) ")" expression)
+    (expression ("func" "(" (arbno identifier) ")" expression)
                 proc-exp)
-    (expression ( "(" expression (arbno expression) ")")
+    (expression ("[" expression "("(arbno expression) "]")
                 app-exp)
     (expression ("letrec" (arbno identifier "(" (separated-list identifier ",") ")" "=" expression)  "in" expression) 
                 letrec-exp)
@@ -112,7 +114,7 @@
     ;(expression ("for" identifier "in" expression "do" expression "done")for-exp)
 
     ;; Paradigma funcional
-    ;; Porn ahora, pero falta mejorar la definición de funciones
+    ;; Por ahora, pero falta mejorar la definición de funciones
     ;(expression ("func" identifier "(" (separated-list identifier ",") ")" "{" expression "}") func-exp)
     ;(expression ("return" expression) return-exp)
     ;(expression ("call" "(" expression (arbno "," expression) ")") app-exp)
@@ -125,65 +127,19 @@
 
 
     ;; Evaluación de expresiones algebraicas
-    (expression ("evaluar" "(" expression "," (separated-list identifier "=" expression ",") ")") eval-exp)
-    (primitive ("+") add-prim)
-    (primitive ("-") substract-prim)
-    (primitive ("*") mult-prim)
-    ;(primitive ("/") div-prim)
-    (primitive ("add1") incr-prim)
-    (primitive ("sub1") decr-prim)
+    (expression ("evaluar" "(" expression "," (separated-list identifier "=" expression ",") ")")
+                eval-exp)
+    (primitive-bin ("+") add-prim)
+    (primitive-bin ("-") substract-prim)
+    (primitive-bin ("*") mult-prim)
+    (primitive-bin ("/") div-prim)
+    (primitive-un ("add1") incr-prim)
+    (primitive-un ("sub1") decr-prim)
     ;(primitive ("simplificar") simplify-prim)
     ))
 
 
 ;Tipos de datos para la sintaxis abstracta de la gramática
-
-;Construidos manualmente:
-
-;(define-datatype program program?
-;  (a-program
-;   (exp expression?)))
-;
-;(define-datatype expression expression?
-;  (lit-exp
-;   (datum number?))
-;  (var-exp
-;   (id symbol?))
-;  (primapp-exp
-;   (prim primitive?)
-;   (rands (list-of expression?)))
-;  (if-exp
-;   (test-exp expression?)
-;   (true-exp expression?)
-;   (false-exp expression?))
-;  (let-exp
-;   (ids (list-of symbol?))
-;   (rans (list-of expression?))
-;   (body expression?))
-;  (proc-exp
-;   (ids (list-of symbol?))
-;   (body expression?))
-;  (app-exp
-;   (proc expression?)
-;   (args (list-of expression?)))
-;  (letrec-exp
-;   (proc-names (list-of symbol?))
-;   (idss (list-of (list-of symbol?)))
-;   (bodies (list-of expression?))
-;   (body-letrec expression?))
-;  (begin-exp
-;   (exp expression?)
-;   (exps (list-of expression?)))
-;  (set-exp
-;   (id symbol?)
-;   (rhs expression?)))
-;
-;(define-datatype primitive primitive?
-;  (add-prim)
-;  (substract-prim)
-;  (mult-prim)
-;  (incr-prim)
-;  (decr-prim))
 
 ;Construidos automáticamente:
 
@@ -220,11 +176,35 @@
 ;eval-program: <programa> -> numero
 ; función que evalúa un programa teniendo en cuenta un ambiente dado (se inicializa dentro del programa)
 
+
 (define eval-program
   (lambda (pgm)
     (cases program pgm
-      (a-program (body)
-                 (eval-expression body (init-env))))))
+      (a-program (exp exps)
+                 (letrec
+                     ([env (init-env)]
+                      [loop (lambda (acc exps current-env)
+                              (if (null? exps)
+                                  acc
+                                  (let
+                                      ([result (eval-expression (car exps) current-env)])
+                                    (if (environment? result)
+                                        (loop 1 (cdr exps) result)
+                                        (loop result (cdr exps) current-env)))
+                                  )
+                              )
+                            ])
+                   (let
+                       ([result (eval-expression exp env)])
+                     (if (environment? result)
+                         (loop 1 exps result)
+                         (loop result exps env)))
+                   )
+                   )
+                 )
+      )
+    )
+
 
 ; Ambiente inicial
 ;(define init-env
@@ -275,15 +255,13 @@
       (id-exp (id) (apply-env env id))
       (cadena-exp (txt) (substring txt 1 (- (string-length txt) 1)))
 
-      (var-exp (ids rhs-exps body)
+      (var-exp (ids rhs-exps)
                (let ((vals (map (lambda (e) (eval-expression e env)) rhs-exps)))
-                 (eval-expression body
-                                  (extend-env ids (map direct-target vals) env))))
+                 (extend-env ids (map direct-target vals) env)))
  
-      (const-exp (ids rhs-exps body)
+      (const-exp (ids rhs-exps)
                  (let ((vals (map (lambda (e) (eval-expression e env)) rhs-exps)))
-                   (eval-expression body
-                                    (extend-env ids (map readonly-target vals) env))))
+                   (extend-env ids (map readonly-target vals) env)))
      
       (set-exp (id rhs-exp)
                (let ((val (eval-expression rhs-exp env))
@@ -295,9 +273,15 @@
       (false-exp () #f)
 
       (null-exp () 'null)
-      (primapp-exp (prim rands)
-                   (let ((args (eval-primapp-exp-rands rands env)))
-                     (apply-primitive prim args)))
+      (primapp-bin-exp (rand1 prim rand2)
+                       ; Evalua cada de sus expresiones
+                   (let ((arg1 (eval-expression rand1 env)) 
+                         (arg2 (eval-expression rand2 env)))
+                     ; Aplica la primitiva con el resultado de evaluar sus expresiones
+                     (apply-primapp-bin arg1 prim arg2)))
+      (primapp-un-exp (prim exp)
+                      ; Aplica la primitiva unaria recibida con el resultado de evaluar la expresión
+                      (apply-primapp-un prim (eval-expression exp env))) 
       (if-exp (test-exp true-exp false-exp)
               (if (true-value? (eval-expression test-exp env))
                   (eval-expression true-exp env)
@@ -360,14 +344,44 @@
     (direct-target (eval-expression rand env))))
 
 ;apply-primitive: <primitiva> <list-of-expression> -> numero
-(define apply-primitive
-  (lambda (prim args)
-    (cases primitive prim
-      (add-prim () (+ (car args) (cadr args)))
-      (substract-prim () (- (car args) (cadr args)))
-      (mult-prim () (* (car args) (cadr args)))
-      (incr-prim () (+ (car args) 1))
-      (decr-prim () (- (car args) 1)))))
+(define apply-primapp-bin
+  (lambda (exp1 prim exp2)
+    ; Cases para aplicar según la variante de primitiva binaria
+    (cases primitive-bin prim
+      ; Primitiva suma
+      ; Suma ambas expresiones
+      (add-prim () (+ exp1 exp2))
+      ; Primitiva resta
+      ; Resta ambas expresiones
+      (substract-prim () (- exp1 exp2))
+      ; Primitiva división
+      ; Divide las expresiones
+      (div-prim () (/ exp1 exp2))
+      ; Primitiva multiplicación
+      ; Multiplica las expresiones
+      (mult-prim () (* exp1 exp2)))
+    )
+  )
+
+(define apply-primapp-un
+  (lambda (prim exp)
+    ; Cases para aplicar según la variante de primitiva unaria
+    (cases primitive-un prim
+    ; Primitiva sumar-1
+    (incr-prim () (if (number? exp) ; Chequea que la expresión sea un numero
+                           ; Suma 1 a la expresión
+                           (+ exp 1)
+                           ; Sino retorna un error
+                           (eopl:error 'contract-violation "La expresión no es un número: ~s" exp)))
+     ; Primitiva restar-1
+    (decr-prim () (if (number? exp) ; Chequea que la expresión sea un numero
+                           ; Resta 1 a la expresión
+                           (- exp 1)
+                           ; Sino, retorna error
+                           (eopl:error 'contract-violation "La expresión no es un número: ~s" exp)))
+      )
+    )
+  )
 
 ;true-value?: determina si un valor dado corresponde a un valor booleano falso o verdadero
 (define true-value?
@@ -549,40 +563,40 @@
 (show-the-datatypes)
 just-scan
 scan&parse
-(just-scan "add1(x)")
-(just-scan "add1(   x   )#cccc")
-(just-scan "add1(  +(5, x)   )#cccc")
-(just-scan "add1(  +(5, #ccccc x) ")
-(scan&parse "add1(x)")
-(scan&parse "add1(   x   )#cccc")
-(scan&parse "add1(  +(5, x)   )#cccc")
-(scan&parse "add1(  +(5, #cccc
-x)) ")
-(scan&parse "if -(x,4) then +(y,11) else *(y,10)")
+(just-scan "add1(x) end")
+(just-scan "add1(   x   )#cccc end")
+(just-scan "add1(  +(5, x)   )#cccc end")
+(just-scan "add1(  +(5, #ccccc x)  end")
+(scan&parse "add1(x) end")
+(scan&parse "add1(   x   ) end")
+(scan&parse "add1((x + 5)) end")
+(scan&parse "add1(  (5 + #cccc
+x))  end")
+(scan&parse "if (x - 4) then (y + 11) else (y * 10) end")
 (scan&parse "let
-x = -(y,1)
+x = (y - 1)
 in
 let
-x = +(x,2)
+x = (x + 2)
 in
-add1(x)")
+add1(x)
+end")
 
-(just-scan "add1(  +(5, #esto es un comentario \n x))")
-(scan&parse "add1(  +(5, #esto es un comentario \n x))")
+(just-scan "add1(  (5 + #esto es un comentario \n x)) end")
+(scan&parse "add1(  (5 + #esto es un comentario \n x)) end")
 
-(define caso1 (primapp-exp (incr-prim) (list (numero-exp 5))))
+(define caso1 (primapp-un-exp (incr-prim) (numero-exp 5)))
 (define exp-numero (numero-exp 8))
 (define exp-ident (id-exp 'c))
-(define exp-app (primapp-exp (add-prim) (list exp-numero exp-ident)))
-(define programa (a-program exp-app))
-(define una-expresion-dificil (primapp-exp (mult-prim)
-                                           (list (primapp-exp (incr-prim)
-                                                              (list (id-exp 'v)
-                                                                    (id-exp 'y)))
-                                                 (id-exp 'x)
-                                                 (numero-exp 200))))
+(define exp-app (primapp-bin-exp exp-numero (add-prim) exp-ident))
+(define programa (a-program exp-app '()))
+(define una-expresion-dificil (primapp-bin-exp
+                               (primapp-un-exp (incr-prim) (id-exp 'v))
+                               (mult-prim)
+                               (numero-exp 200)))
 (define un-programa-dificil
-    (a-program una-expresion-dificil))
+    (a-program una-expresion-dificil '()))
+
 
 (interpretador)
 
