@@ -24,7 +24,7 @@
 ;;                      const-exp (id exp)
 ;;                  ::= (<expression> <primitive-bin> <expression>)
 ;;                      <primapp-bin-exp (rand1 prim rand2)>
-;;                  ::= <primitive-uni> (<expression>)
+;;                  ::= <primitive-un> (<expression>)
 ;;                      <primapp-un-exp (prim rand)>
 ;;                  ::= if <expresion> then <expresion> else <expression>
 ;;                      <if-exp (exp1 exp2 exp23)>
@@ -38,11 +38,14 @@
 ;;                     <begin-exp (exp exps)>
 ;;                  ::= set <identifier> = <expression>
 ;;                     <set-exp (id rhsexp)>
-;;  <primitive>     ::= + | - | * | add1 | sub1
-;;  <bool>          ::= (<bool> <prim-comp> <bool>)
-;;                  ::= (<bool> <op-bin-bool> <bool>)
-;;                  ::= (<op-un-bool> <bool>)
-;;                  ::= true | false
+;;                  ::= print ( <expression> );
+;;                     <print-exp (exp)>
+;;  <primitive-bin> ::= + | - | * | /
+;;                  ::= < | > | <= | >= | == | !=
+;;                  ::= and | or
+;;  <primitive-un>  ::= add1 | sub1
+;;                  ::= not
+;;  <bool>          ::= true | false
 
 
 ;******************************************************************************************
@@ -80,8 +83,6 @@
     (expression (identifier) id-exp)
     (expression (string-text) cadena-exp)
     (expression (number) numero-exp)
-    (expression ("true") true-exp)
-    (expression ("false") false-exp)
     (expression ("null") null-exp)
 
     ;; Declaraciones secuenciales
@@ -97,15 +98,15 @@
                 primapp-un-exp)
     (expression ("if" expression "then" expression "else" expression)
                 if-exp)
-    (expression ("let" (arbno identifier "=" expression) "in" expression)
-                let-exp)
     (expression ("func" "(" (arbno identifier) ")" expression)
                 proc-exp)
     (expression ("[" expression "("(arbno expression) "]")
                 app-exp)
-    (expression ("letrec" (arbno identifier "(" (separated-list identifier ",") ")" "=" expression)  "in" expression) 
-                letrec-exp)
-
+    (expression ("print" "(" expression ")" ";") print-exp)
+    ;; Booleanos
+    (expression (bool) boolean-exp)
+    (bool ("true") true-exp)
+    (bool ("false") false-exp)
     ;; Estructuras de control
     ;(expression ("if" expression "then" expression "else" expression "end") if-exp)
     ;(expression ("begin" (separated-list expression ";") "end") begin-exp)
@@ -133,8 +134,18 @@
     (primitive-bin ("-") substract-prim)
     (primitive-bin ("*") mult-prim)
     (primitive-bin ("/") div-prim)
+    (primitive-bin (">") greater-prim)
+    (primitive-bin ("<") less-prim)
+    (primitive-bin (">=") greater-equal-prim)
+    (primitive-bin ("<=") less-equal-prim)
+    (primitive-bin ("==") equal-prim)
+    (primitive-bin ("!=") not-equal-prim)
+    (primitive-bin ("and") and-prim)
+    (primitive-bin ("or") or-prim)
+;; Unary primitives
     (primitive-un ("add1") incr-prim)
     (primitive-un ("sub1") decr-prim)
+    (primitive-un ("not") not-prim)
     ;(primitive ("simplificar") simplify-prim)
     ))
 
@@ -269,9 +280,6 @@
                  (setref! ref val)
                  val))
 
-      (true-exp () #t)
-      (false-exp () #f)
-
       (null-exp () 'null)
       (primapp-bin-exp (rand1 prim rand2)
                        ; Evalua cada de sus expresiones
@@ -286,9 +294,6 @@
               (if (true-value? (eval-expression test-exp env))
                   (eval-expression true-exp env)
                   (eval-expression false-exp env)))
-      (let-exp (ids rands body)
-               (let ((args (eval-let-exp-rands rands env)))
-                 (eval-expression body (extend-env ids args env))))
       (proc-exp (ids body)
                 (closure ids body env))
       (app-exp (rator rands)
@@ -298,9 +303,6 @@
                      (apply-procedure proc args)
                      (eopl:error 'eval-expression
                                  "Attempt to apply non-procedure ~s" proc))))
-      (letrec-exp (proc-names idss bodies letrec-body)
-                  (eval-expression letrec-body
-                                   (extend-env-recursively proc-names idss bodies env)))
       (begin-exp (exp exps)
                  (let loop ((acc (eval-expression exp env))
                              (exps exps))
@@ -309,6 +311,12 @@
                         (loop (eval-expression (car exps) 
                                                env)
                               (cdr exps)))))
+      (boolean-exp (exp)
+                   (eval-bool exp))
+      (print-exp (exp)
+                 (display (eval-expression exp env))
+                 (newline)
+                 1)
       (else exp))))
 
 ; funciones auxiliares para aplicar eval-expression a cada elemento de una 
@@ -359,7 +367,16 @@
       (div-prim () (/ exp1 exp2))
       ; Primitiva multiplicación
       ; Multiplica las expresiones
-      (mult-prim () (* exp1 exp2)))
+      (mult-prim () (* exp1 exp2))
+      (greater-prim () (> exp1 exp2))
+      (less-prim () (< exp1 exp2))
+      (greater-equal-prim () (>= exp1 exp2))
+      (less-equal-prim () (<= exp1 exp2))
+      (equal-prim () (equal? exp1 exp2))
+      (not-equal-prim () (not(equal? exp1 exp2)))
+      (and-prim () (and (true-value? exp1) (true-value? exp2)))
+      (or-prim () (or (true-value? exp1) (true-value? exp2)))
+      )
     )
   )
 
@@ -379,6 +396,7 @@
                            (- exp 1)
                            ; Sino, retorna error
                            (eopl:error 'contract-violation "La expresión no es un número: ~s" exp)))
+      (not-prim () (not(true-value? exp)))
       )
     )
   )
@@ -387,11 +405,31 @@
 (define true-value?
   (lambda (x)
     (cond
-      ((eqv? x #f) #f)         
+      ((bool? x) (true-value? (eval-bool x)))
+      ((eqv? x #f) #f)
       ((eqv? x 0) #f)           
       ((equal? x "") #f)        
       ((eqv? x 'null) #f)      
-      (else #t))))              
+      (else #t))))
+
+
+;eval-bool: Evalua las expresiones booleanas true o false al true y false de racktet
+(define eval-bool
+  (lambda (exp)
+    (cases bool exp
+      (true-exp () #t)
+      (false-exp () #f)
+      )
+    )
+  )
+
+;bool->text: Transforma el resultado de una evaluación booleana de Racket a texto "true" o "false"
+(define bool->text
+  (lambda (exp)
+    (if exp
+    "true"
+    "false"))
+  )
 
 ;*******************************************************************************************
 ;Procedimientos
@@ -573,14 +611,6 @@ scan&parse
 (scan&parse "add1(  (5 + #cccc
 x))  end")
 (scan&parse "if (x - 4) then (y + 11) else (y * 10) end")
-(scan&parse "let
-x = (y - 1)
-in
-let
-x = (x + 2)
-in
-add1(x)
-end")
 
 (just-scan "add1(  (5 + #esto es un comentario \n x)) end")
 (scan&parse "add1(  (5 + #esto es un comentario \n x)) end")
