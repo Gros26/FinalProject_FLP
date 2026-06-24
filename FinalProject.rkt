@@ -1,4 +1,14 @@
 #lang eopl
+(require (only-in racket 
+                  hash? 
+                  hash 
+                  make-hash 
+                  hash-ref 
+                  hash-set 
+                  hash-set! 
+                  hash-has-key? 
+                  hash-keys 
+                  hash-values))
 
 ;******************************************************************************************
 ;;;;; Interpretador para lenguaje con condicionales, ligadura local, procedimientos,
@@ -129,7 +139,7 @@
     (expression ("list" "(" (separated-list expression ",") ")") list-exp)
     ; Diccionarios: { "a": 1, "b": 2 }
     ;(expression ("{" (separated-list identifier ":" expression ",") "}") dict-exp)
-
+    (expression ("crear-diccionario" "(" (separated-list expression ":" expression ",") ")") dict-exp)
 
     ;; Evaluación de expresiones algebraicas
     (expression ("evaluar" "(" expression "," (separated-list identifier "=" expression ",") ")")
@@ -153,6 +163,9 @@
     (primitive-bin ("crear-lista") crear-lista-prim)
     (primitive-bin ("append") append-prim)
     (primitive-bin ("ref-list") ref-list-prim)
+
+    ;Dictionaries primitives
+    (primitive-bin ("ref-diccionario") ref-dict-prim)
     
     ;; Unary primitives
     (primitive-un ("add1") incr-prim)
@@ -167,7 +180,15 @@
     (primitive-un ("cola") cola-prim)
     ;(primitive ("simplificar") simplify-prim)
 
+    ; Dictionaries primitives
+    (primitive-un ("diccionario?") is-dict-prim)
+    (primitive-un ("claves") dict-keys-prim)
+    (primitive-un ("valores") dict-values-prim)
+
     (primitive-ter ("set-list") set-list-prim)
+
+    ; Dictionaries primitives
+    (primitive-ter ("set-diccionario") set-dict-prim)
     ))
 
 
@@ -382,7 +403,10 @@
                              (loop (+ i 1)))                       
                            'null))                                  
                      (eopl:error 'eval-expression "Error: el ciclo for exige una lista, recibio: ~s" lst))))
-      
+      (dict-exp (keys values)
+                (let ((eval-keys (map (lambda (k) (eval-expression k env)) keys))
+                      (eval-values (map (lambda (v) (eval-expression v env)) values)))
+                     (make-hash (map cons eval-keys eval-values))))
       (else exp))))
 
 ; funciones auxiliares para aplicar eval-expression a cada elemento de una 
@@ -458,6 +482,10 @@
                          (if (and (>= exp2 0) (< exp2 (vector-length exp1)))
                              (vector-ref exp1 exp2) 'null)
                          (eopl:error 'apply-primapp-bin "Error: ref-list requiere una lista y un numero entero")))
+      (ref-dict-prim () 
+                  (if (hash? exp1)
+                      (hash-ref exp1 exp2 'null)
+                      (eopl:error 'apply-primapp-bin "Error: ref-diccionario requiere un diccionario como primer argumento, recibio: ~s" exp1)))
       )
     )
   )
@@ -494,6 +522,15 @@
                      (if (> (vector-length exp) 0)
                          (list->vector (cdr (vector->list exp))) (vector))          
                      (eopl:error 'apply-primapp-un "Error: cola requiere una lista")))
+      (is-dict-prim () (hash? exp))
+      (dict-keys-prim ()
+                  (if (hash? exp)
+                      (list->vector (hash-keys exp))
+                      (eopl:error 'apply-primapp-un "Error: claves requiere un diccionario, recibio: ~s" exp)))
+      (dict-values-prim ()
+                  (if (hash? exp)
+                      (list->vector (hash-values exp))
+                      (eopl:error 'apply-primapp-un "Error: valores requiere un diccionario, recibio: ~s" exp)))
       )
     )
   )
@@ -510,7 +547,14 @@
                                (vector-set! exp1 exp2 exp3) ; Modifica
                                exp1)                        ; Retorna la lista
                              (eopl:error 'apply-primapp-ter "Error: Indice ~s fuera de rango" exp2))
-                         (eopl:error 'apply-primapp-ter "Error: set-list requiere una lista y un indice entero"))))))
+                         (eopl:error 'apply-primapp-ter "Error: set-list requiere una lista y un indice entero")))
+      (set-dict-prim ()
+                      (if (hash? exp1)
+                          (begin (hash-set! exp1 exp2 exp3) exp1)
+                          (eopl:error 'apply-primapp-ter "Error: set-diccionario requiere un diccionario como primer argumento, recibio: ~s" exp1)))
+    )
+  )
+)
 
 ;true-value?: determina si un valor dado corresponde a un valor booleano falso o verdadero
 (define true-value?
@@ -629,8 +673,8 @@
 
 (define expval?
   (lambda (x)
-    ;agregado symbol y vector a expval
-    (or (number? x) (procval? x) (symbol? x) (string? x) (boolean? x) (vector? x))))
+    ;agregado symbol y vector a expval, tambien se agrego hash 
+    (or (number? x) (procval? x) (symbol? x) (string? x) (boolean? x) (vector? x) (hash? x))))
 
 (define ref-to-direct-target?
   (lambda (x)
@@ -797,3 +841,18 @@ x))  end")
 ; var x = 3; while (x > 0) do begin print(x); ; set x = (x - 1); end done print("Despegue"); end
 ; var datos = list("MathFlow", true, 42, vacio); for item in datos do print(item); done end
 ; var numeros = list(10, 20, 30); var suma = 0; for n in numeros do set suma = (suma + n); done print(suma); end
+
+
+; crear-diccionario() end
+; crear-diccionario("nombre": "Juanita", "edad": 20) end
+; diccionario?(crear-diccionario()) end
+; diccionario?(5) end
+; var d = crear-diccionario("nombre": "Juanita"); diccionario?(d) end
+; var d = crear-diccionario("nombre": "Juanita", "edad": 20); ref-diccionario(d, "nombre") end
+; var d = crear-diccionario("nombre": "Juanita"); ref-diccionario(d, "edad") end
+; var d = crear-diccionario("edad": 20); ref-diccionario(d, "edad") end
+; var d = list(1,2,3); ref-diccionario(d, "edad") end
+; var d = crear-diccionario(); set-diccionario(d, "nombre", "Juan") end
+; var d = crear-diccionario("edad": 20); set-diccionario(d, "edad", 21) ref-diccionario(d, "edad") end
+; var d = crear-diccionario("nombre": "Juanita", "edad": 20); claves(d) end
+; var d = crear-diccionario("nombre": "Juanita", "edad": 20); valores(d) end
