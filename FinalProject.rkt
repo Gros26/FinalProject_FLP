@@ -430,13 +430,16 @@
 (define eval-rand
   (lambda (rand env)
     (cases expression rand
+      ;si el argumento es un identificador miramos cual valor tiene
       (id-exp (id)
-               (indirect-target
-                (let ((ref (apply-env-ref env id)))
-                  (cases target (primitive-deref ref)
-                    (direct-target (expval) ref)
-                    (readonly-target (expval) ref)
-                    (indirect-target (ref1) ref1)))))
+              (let* ((ref (apply-env-ref env id))
+                     (val (deref ref)))
+                (if (or (vector? val) (hash? val))
+                    ;listas y diccionarios se pasan por referencia
+                    (indirect-target ref)
+                    ;numeros, cadenas, booleanos, null y funciones porf valor
+                    (direct-target val))))
+      ;  si el arg no es un id se evalua normalmente 
       (else
        (direct-target (eval-expression rand env))))))
 
@@ -913,5 +916,40 @@ var doble = func(x) {
             return (x*x);
               };
 [apply (doble)];
+end
+|#
+
+;por valor o referencia
+#| var x = 5;
+def cambiar(a) {
+  set a = 99;
+  return a;
+}
+
+[cambiar (x)]
+x
+end
+|#
+#|
+var l = list(1,2,3);
+
+def cambiarLista(lst) {
+  set-list(lst, 1, 99);
+}
+
+[cambiarLista (l)]
+ref-list(l, 1)
+end
+|#
+#|
+var doble = func(x) {
+  return (x * 2);
+};
+
+def aplicar(f, valor) {
+  return [f (valor)];
+}
+
+[aplicar (doble 8)]
 end
 |#
