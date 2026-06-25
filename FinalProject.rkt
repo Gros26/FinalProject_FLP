@@ -108,11 +108,14 @@
                 primapp-un-exp)
     (expression (primitive-ter "(" expression "," expression "," expression ")")
                 primapp-ter-exp)
-    (expression ("func" "(" (arbno identifier) ")" expression)
-                proc-exp)
-    (expression ("[" expression "("(arbno expression) ")" "]")   ; expression o identifier?
-                app-exp)
+    
     (expression ("print" "(" expression ")" ";") print-exp)
+
+    ;funciones
+    (expression ("func" "(" (separated-list identifier ",") ")"  "{" (arbno expression) "}") proc-exp)
+    (expression ("def" identifier "(" (separated-list identifier ",") ")"  "{" (arbno expression) "}") def-exp)
+    (expression ("return" expression ";") return-exp)
+    (expression ("[" expression "("(arbno expression) ")" "]") app-exp)
     
     ;; Booleanos
     (expression (bool) boolean-exp)
@@ -299,6 +302,10 @@
   (a-ref (position integer?)
          (vec vector?)))
 
+(define-datatype return-signal return-signal?
+  (a-return
+   (val expval?)))
+
 ;**************************************************************************************
 
 (define eval-expression
@@ -407,7 +414,12 @@
                 (let ((eval-keys (map (lambda (k) (eval-expression k env)) keys))
                       (eval-values (map (lambda (v) (eval-expression v env)) values)))
                      (make-hash (map cons eval-keys eval-values))))
-      (else exp))))
+      (return-exp (ret-exp) (a-return (eval-expression ret-exp env)))
+      (def-exp (name ids body) (extend-env-recursively 
+                                  (list name)
+                                  (list ids)
+                                  (list body)
+                                env)) (else exp))))
 
 ; funciones auxiliares para aplicar eval-expression a cada elemento de una 
 ; lista de operandos (expresiones)
@@ -591,15 +603,31 @@
 (define-datatype procval procval?
   (closure
    (ids (list-of symbol?))
-   (body expression?)
+   (body (list-of expression?))
    (env environment?)))
 
-;apply-procedure: evalua el cuerpo de un procedimientos en el ambiente extendido correspondiente
+#|apply-procedure: evalua el cuerpo de un procedimientos en el ambiente extendido correspondiente. 
+Si tiene return devuelve el valor de la expresion return, de otra manera devuelve 'null
+|#
 (define apply-procedure
+  ;recibe una closure y los argumentos
   (lambda (proc args)
     (cases procval proc
+      ;abrimos la closure 
       (closure (ids body env)
-               (eval-expression body (extend-env ids args env))))))
+              ;creamos un nuevo ambiente haciendo binding de los argumentos a los ids
+               (let ((new-env (extend-env ids args env)))
+                ; iteramos sobre el cuerpo de la funcion
+                 (let loop ((exps body))
+                   ; si se acabo el cuerpo y nunca aparecio return devolvemos 'null
+                   (if (null? exps)
+                       'null
+                       ;evaluamos el cadr en el nuevo ambiente
+                       (let ((result (eval-expression (car exps) new-env)))
+                         (if (return-signal? result)
+                             (cases return-signal result
+                               (a-return (val) val))
+                             (loop (cdr exps)))))))))))
 
 ;*******************************************************************************************
 ;Ambientes
@@ -856,3 +884,24 @@ x))  end")
 ; var d = crear-diccionario("edad": 20); set-diccionario(d, "edad", 21) ref-diccionario(d, "edad") end
 ; var d = crear-diccionario("nombre": "Juanita", "edad": 20); claves(d) end
 ; var d = crear-diccionario("nombre": "Juanita", "edad": 20); valores(d) end
+
+;funciones
+#| 
+func: crea funciones anónimas que pueden guardarse en variables.
+def: declara funciones con nombre, incluyendo funciones recursivas.
+[expFuncion (args...)]: aplica cualquier expresión que evalúe a una función. 
+|#
+; def sumar(a,b) { return (a + b); } [sumar (10 20)] end
+; var doble = func(x) { return (x * 2); }; [doble (5)] end
+; def saludar(nombre) { print(nombre); } [saludar ("Ana")] end
+#|
+def factorial(n) {
+  if (n <= 1) then
+    return 1;
+  else
+    return (n * [factorial ((n - 1))]);
+}
+
+[factorial (5)]
+end
+|#
