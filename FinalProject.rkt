@@ -905,3 +905,13 @@ def factorial(n) {
 [factorial (5)]
 end
 |#
+#|
+var apply = func(funcion) {
+return [funcion (5)];
+        };
+var doble = func(x) {
+            return (x*x);
+              };
+[apply (doble)];
+end
+|#
