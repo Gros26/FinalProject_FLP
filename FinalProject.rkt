@@ -40,9 +40,15 @@
 ;;                      <if-exp (exp1 exp2 exp23)>
 ;;                  ::= let {<identifier> = <expression>}* in <expression>
 ;;                      <let-exp (ids rands body)>
-;;                  ::= func({<identificador>}*(,)) <expression>
+;;                  ::= func({<identifier>}*(,)) { {<expression>}* }
 ;;                      <proc-exp (ids body)>
-;;                  ::= <expression> ({<expression>}*)
+;;                  ::= def <identifier>({<identifier>}*(,)) { {<expression>}* }
+;;                      <def-exp (name ids body)>
+;;                  ::= return <expression>;
+;;                      <return-exp (return-exp)>
+;;                  ::= crear-diccionario({<expression> : <expression>}*(,))
+;;                      <dict-exp (keys values)>
+;;                  ::= [<expression> ({<expression>}*)]
 ;;                      <app-exp (proc rands)>
 ;;                  ::= begin <expression> {; <expression>}* end
 ;;                     <begin-exp (exp exps)>
@@ -50,6 +56,8 @@
 ;;                     <set-exp (id rhsexp)>
 ;;                  ::= print ( <expression> );
 ;;                     <print-exp (exp)>
+;;                  ::= crear-diccionario ( {<expression> : <expression>}*(,) )
+;;                      <dict-exp (keys values)>
 ;;  <primitive-bin> ::= + | - | * | /
 ;;                  ::= < | > | <= | >= | == | !=
 ;;                  ::= and | or
