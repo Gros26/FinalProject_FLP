@@ -396,7 +396,8 @@
                            (- exp 1)
                            ; Sino, retorna error
                            (eopl:error 'contract-violation "La expresión no es un número: ~s" exp)))
-      (not-prim () (not(true-value? exp)))
+      (not-prim () (not(true-value? exp))
+                )
       )
     )
   )
@@ -412,8 +413,14 @@
       ((eqv? x 'null) #f)      
       (else #t))))
 
+;
+(define is-comparable?
+  (lambda (exp)
+    (or (number? exp) (symbol? exp) (string? exp))
+    ))
 
-;eval-bool: Evalua las expresiones booleanas true o false al true y false de racktet
+
+;eval-bool: Evalua las expresiones booleanas "true" y "false" al #t y #f de racktet
 (define eval-bool
   (lambda (exp)
     (cases bool exp
@@ -519,7 +526,8 @@
 (define expval?
   (lambda (x)
     ;agregado symbol a expval
-    (or (number? x) (procval? x) (symbol? x) (string? x) (boolean? x))))
+    (or (number? x) (procval? x) (symbol? x) (string? x) (boolean? x))
+    ))
 
 (define ref-to-direct-target?
   (lambda (x)
