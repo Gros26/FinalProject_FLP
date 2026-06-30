@@ -1,4 +1,14 @@
 #lang eopl
+(require (only-in racket 
+                  hash? 
+                  hash 
+                  make-hash 
+                  hash-ref 
+                  hash-set 
+                  hash-set! 
+                  hash-has-key? 
+                  hash-keys 
+                  hash-values))
 
 ;******************************************************************************************
 ;;;;; Interpretador para lenguaje con condicionales, ligadura local, procedimientos,
@@ -30,9 +40,15 @@
 ;;                      <if-exp (exp1 exp2 exp23)>
 ;;                  ::= let {<identifier> = <expression>}* in <expression>
 ;;                      <let-exp (ids rands body)>
-;;                  ::= func({<identificador>}*(,)) <expression>
+;;                  ::= func({<identifier>}*(,)) { {<expression>}* }
 ;;                      <proc-exp (ids body)>
-;;                  ::= <expression> ({<expression>}*)
+;;                  ::= def <identifier>({<identifier>}*(,)) { {<expression>}* }
+;;                      <def-exp (name ids body)>
+;;                  ::= return <expression>;
+;;                      <return-exp (return-exp)>
+;;                  ::= crear-diccionario({<expression> : <expression>}*(,))
+;;                      <dict-exp (keys values)>
+;;                  ::= [<expression> ({<expression>}*)]
 ;;                      <app-exp (proc rands)>
 ;;                  ::= begin <expression> {; <expression>}* end
 ;;                     <begin-exp (exp exps)>
@@ -40,6 +56,8 @@
 ;;                     <set-exp (id rhsexp)>
 ;;                  ::= print ( <expression> );
 ;;                     <print-exp (exp)>
+;;                  ::= crear-diccionario ( {<expression> : <expression>}*(,) )
+;;                      <dict-exp (keys values)>
 ;;  <primitive-bin> ::= + | - | * | /
 ;;                  ::= < | > | <= | >= | == | !=
 ;;                  ::= and | or
@@ -84,48 +102,55 @@
     (expression (string-text) cadena-exp)
     (expression (number) numero-exp)
     (expression ("null") null-exp)
+    (expression ("vacio") vacio-exp)
 
     ;; Declaraciones secuenciales
-    
     (expression ("var" (separated-list identifier "=" expression ",")";") var-exp)
     (expression ("const" (separated-list identifier "=" expression ",")";") const-exp)
     (expression ("set" identifier "=" expression ";") set-exp)
-    (expression ("begin" expression (arbno ";" expression) "end")
-                begin-exp)
     (expression ("(" expression primitive-bin expression ")")
                 primapp-bin-exp)
+    (expression (primitive-bin "(" expression "," expression ")")
+                primapp-prefix-bin-exp)
     (expression (primitive-un  "(" expression ")")
                 primapp-un-exp)
-    (expression ("if" expression "then" expression "else" expression)
-                if-exp)
-    (expression ("func" "(" (arbno identifier) ")" expression)
-                proc-exp)
-    (expression ("[" expression "("(arbno expression) "]")
-                app-exp)
+    (expression (primitive-ter "(" expression "," expression "," expression ")")
+                primapp-ter-exp)
+    
     (expression ("print" "(" expression ")" ";") print-exp)
+
+    ;funciones
+    (expression ("func" "(" (separated-list identifier ",") ")"  "{" (arbno expression) "}") proc-exp)
+    (expression ("def" identifier "(" (separated-list identifier ",") ")"  "{" (arbno expression) "}") def-exp)
+    (expression ("return" expression ";") return-exp)
+    (expression ("[" expression "("(arbno expression) ")" "]") app-exp)
+    
     ;; Booleanos
     (expression (bool) boolean-exp)
     (bool ("true") true-exp)
     (bool ("false") false-exp)
+    
     ;; Estructuras de control
-    ;(expression ("if" expression "then" expression "else" expression "end") if-exp)
+    (expression ("if" expression "then" expression "else" expression)
+                if-exp)
+    (expression ("begin" expression (arbno ";" expression) "end")
+                begin-exp)
     ;(expression ("begin" (separated-list expression ";") "end") begin-exp)
-    ;(expression ("switch" expression "{" (arbno "case" expression ":" expression) "default" ":" expression "}") switch-exp)
-    ;(expression ("while" expression "do" expression "done") while-exp)
-    ;(expression ("for" identifier "in" expression "do" expression "done")for-exp)
+    (expression ("switch" expression "{" (arbno "case" expression ":" expression) "default" ":" expression "}") switch-exp)
+    (expression ("while" expression "do" expression "done") while-exp)
+    (expression ("for" identifier "in" expression "do" expression "done")for-exp)
 
     ;; Paradigma funcional
     ;; Por ahora, pero falta mejorar la definición de funciones
     ;(expression ("func" identifier "(" (separated-list identifier ",") ")" "{" expression "}") func-exp)
     ;(expression ("return" expression) return-exp)
-    ;(expression ("call" "(" expression (arbno "," expression) ")") app-exp)
 
     ;; Estructuras mutables
     ; Listas: [1, 2, 3]
-    ;(expression ("[" (separated-list expression ",") "]") list-exp)
+    (expression ("list" "(" (separated-list expression ",") ")") list-exp)
     ; Diccionarios: { "a": 1, "b": 2 }
     ;(expression ("{" (separated-list identifier ":" expression ",") "}") dict-exp)
-
+    (expression ("crear-diccionario" "(" (separated-list expression ":" expression ",") ")") dict-exp)
 
     ;; Evaluación de expresiones algebraicas
     (expression ("evaluar" "(" expression "," (separated-list identifier "=" expression ",") ")")
@@ -142,11 +167,39 @@
     (primitive-bin ("!=") not-equal-prim)
     (primitive-bin ("and") and-prim)
     (primitive-bin ("or") or-prim)
-;; Unary primitives
+    (primitive-bin ("%") mod-prim)
+    ; String primitive
+    (primitive-bin ("concat") concat-prim)
+    ; List primitives
+    (primitive-bin ("crear-lista") crear-lista-prim)
+    (primitive-bin ("append") append-prim)
+    (primitive-bin ("ref-list") ref-list-prim)
+
+    ;Dictionaries primitives
+    (primitive-bin ("ref-diccionario") ref-dict-prim)
+    
+    ;; Unary primitives
     (primitive-un ("add1") incr-prim)
     (primitive-un ("sub1") decr-prim)
     (primitive-un ("not") not-prim)
+    ; String primitive
+    (primitive-un ("longitud") length-prim)
+    ; List primitives
+    (primitive-un ("vacio?") is-vacio-prim)
+    (primitive-un ("lista?") is-list-prim)
+    (primitive-un ("cabeza") cabeza-prim)
+    (primitive-un ("cola") cola-prim)
     ;(primitive ("simplificar") simplify-prim)
+
+    ; Dictionaries primitives
+    (primitive-un ("diccionario?") is-dict-prim)
+    (primitive-un ("claves") dict-keys-prim)
+    (primitive-un ("valores") dict-values-prim)
+
+    (primitive-ter ("set-list") set-list-prim)
+
+    ; Dictionaries primitives
+    (primitive-ter ("set-diccionario") set-dict-prim)
     ))
 
 
@@ -257,6 +310,10 @@
   (a-ref (position integer?)
          (vec vector?)))
 
+(define-datatype return-signal return-signal?
+  (a-return
+   (val expval?)))
+
 ;**************************************************************************************
 
 (define eval-expression
@@ -280,16 +337,26 @@
                  (setref! ref val)
                  val))
 
-      (null-exp () 'null)
+      (null-exp () 'null) 
+      (vacio-exp () (vector)) ; Retorna un vector de tamaño cero #()
       (primapp-bin-exp (rand1 prim rand2)
                        ; Evalua cada de sus expresiones
-                   (let ((arg1 (eval-expression rand1 env)) 
+                       (let ((arg1 (eval-expression rand1 env)) 
                          (arg2 (eval-expression rand2 env)))
-                     ; Aplica la primitiva con el resultado de evaluar sus expresiones
-                     (apply-primapp-bin arg1 prim arg2)))
+                       ; Aplica la primitiva con el resultado de evaluar sus expresiones
+                         (apply-primapp-bin arg1 prim arg2)))
+      (primapp-prefix-bin-exp (prim rand1 rand2)
+                              (let ((arg1 (eval-expression rand1 env))
+                                    (arg2 (eval-expression rand2 env)))
+                                (apply-primapp-bin arg1 prim arg2)))
       (primapp-un-exp (prim exp)
                       ; Aplica la primitiva unaria recibida con el resultado de evaluar la expresión
-                      (apply-primapp-un prim (eval-expression exp env))) 
+                      (apply-primapp-un prim (eval-expression exp env)))
+      (primapp-ter-exp (prim rand1 rand2 rand3)
+                       (let ((arg1 (eval-expression rand1 env))
+                             (arg2 (eval-expression rand2 env))
+                             (arg3 (eval-expression rand3 env)))
+                         (apply-primapp-ter prim arg1 arg2 arg3)))
       (if-exp (test-exp true-exp false-exp)
               (if (true-value? (eval-expression test-exp env))
                   (eval-expression true-exp env)
@@ -317,7 +384,50 @@
                  (display (eval-expression exp env))
                  (newline)
                  1)
-      (else exp))))
+      (switch-exp (base-exp cases-exps bodies-exps default-exp)
+                  (let ((base-val (eval-expression base-exp env)))
+                    (let loop ((cases cases-exps)
+                               (bodies bodies-exps))
+                      (if (null? cases)
+                          (eval-expression default-exp env)
+                          (let ((case-val (eval-expression (car cases) env)))
+                            (if (equal? base-val case-val)
+                                (eval-expression (car bodies) env)
+                                (loop (cdr cases) (cdr bodies))))))))
+      (list-exp (exps)
+                (let ((vals (map (lambda (e) (eval-expression e env)) exps)))
+                  (list->vector vals)))
+      (while-exp (test-exp body-exp)
+                 (let loop () ; Iniciamos un ciclo recursivo infinito
+                   (if (true-value? (eval-expression test-exp env)) ; Evaluamos la condición
+                       (begin
+                         (eval-expression body-exp env)             ; Si es true, entonces evaluamos el cuerpo
+                         (loop))                                    ; Luego se vuelve a llamar al ciclo
+                       'null)))
+      (for-exp (id list-exp body-exp)
+               (let ((lst (eval-expression list-exp env)))          ; Evaluamos la lista iterable
+                 (if (vector? lst)                                  
+                     (let loop ((i 0))                              
+                       (if (< i (vector-length lst))               
+                           (begin
+                             ; Evaluamos el cuerpo en un amb. extendido
+                             (eval-expression body-exp 
+                                              (extend-env (list id) 
+                                                          (list (direct-target (vector-ref lst i))) 
+                                                          env))
+                             (loop (+ i 1)))                       
+                           'null))                                  
+                     (eopl:error 'eval-expression "Error: el ciclo for exige una lista, recibio: ~s" lst))))
+      (dict-exp (keys values)
+                (let ((eval-keys (map (lambda (k) (eval-expression k env)) keys))
+                      (eval-values (map (lambda (v) (eval-expression v env)) values)))
+                     (make-hash (map cons eval-keys eval-values))))
+      (return-exp (ret-exp) (a-return (eval-expression ret-exp env)))
+      (def-exp (name ids body) (extend-env-recursively 
+                                  (list name)
+                                  (list ids)
+                                  (list body)
+                                env)) (else exp))))
 
 ; funciones auxiliares para aplicar eval-expression a cada elemento de una 
 ; lista de operandos (expresiones)
@@ -328,13 +438,16 @@
 (define eval-rand
   (lambda (rand env)
     (cases expression rand
+      ;si el argumento es un identificador miramos cual valor tiene
       (id-exp (id)
-               (indirect-target
-                (let ((ref (apply-env-ref env id)))
-                  (cases target (primitive-deref ref)
-                    (direct-target (expval) ref)
-                    (readonly-target (expval) ref)
-                    (indirect-target (ref1) ref1)))))
+              (let* ((ref (apply-env-ref env id))
+                     (val (deref ref)))
+                (if (or (vector? val) (hash? val))
+                    ;listas y diccionarios se pasan por referencia
+                    (indirect-target ref)
+                    ;numeros, cadenas, booleanos, null y funciones porf valor
+                    (direct-target val))))
+      ;  si el arg no es un id se evalua normalmente 
       (else
        (direct-target (eval-expression rand env))))))
 
@@ -376,6 +489,26 @@
       (not-equal-prim () (not(equal? exp1 exp2)))
       (and-prim () (and (true-value? exp1) (true-value? exp2)))
       (or-prim () (or (true-value? exp1) (true-value? exp2)))
+      (mod-prim () (modulo exp1 exp2))
+      (concat-prim () (string-append exp1 exp2))
+      (crear-lista-prim ()
+                        (if (vector? exp2) 
+                            (list->vector (cons exp1 (vector->list exp2)))
+                            (eopl:error 'apply-primapp-bin 
+                                        "Error: El segundo argumento de crear-lista debe ser una lista, se recibio: ~s" exp2)))
+      (append-prim ()
+                   (if (and (vector? exp1) (vector? exp2))
+                       (list->vector (append (vector->list exp1) (vector->list exp2)))
+                       (eopl:error 'apply-primapp-bin "Error: append requiere dos listas")))
+      (ref-list-prim ()
+                     (if (and (vector? exp1) (integer? exp2))
+                         (if (and (>= exp2 0) (< exp2 (vector-length exp1)))
+                             (vector-ref exp1 exp2) 'null)
+                         (eopl:error 'apply-primapp-bin "Error: ref-list requiere una lista y un numero entero")))
+      (ref-dict-prim () 
+                  (if (hash? exp1)
+                      (hash-ref exp1 exp2 'null)
+                      (eopl:error 'apply-primapp-bin "Error: ref-diccionario requiere un diccionario como primer argumento, recibio: ~s" exp1)))
       )
     )
   )
@@ -384,23 +517,67 @@
   (lambda (prim exp)
     ; Cases para aplicar según la variante de primitiva unaria
     (cases primitive-un prim
-    ; Primitiva sumar-1
-    (incr-prim () (if (number? exp) ; Chequea que la expresión sea un numero
-                           ; Suma 1 a la expresión
-                           (+ exp 1)
-                           ; Sino retorna un error
-                           (eopl:error 'contract-violation "La expresión no es un número: ~s" exp)))
-     ; Primitiva restar-1
-    (decr-prim () (if (number? exp) ; Chequea que la expresión sea un numero
-                           ; Resta 1 a la expresión
-                           (- exp 1)
-                           ; Sino, retorna error
-                           (eopl:error 'contract-violation "La expresión no es un número: ~s" exp)))
-      (not-prim () (not(true-value? exp))
-                )
+      ; Primitiva sumar-1
+      (incr-prim () (if (number? exp) ; Chequea que la expresión sea un numero
+                        ; Suma 1 a la expresión
+                        (+ exp 1)
+                        ; Sino retorna un error
+                        (eopl:error 'contract-violation "La expresión no es un número: ~s" exp)))
+      ; Primitiva restar-1
+      (decr-prim () (if (number? exp) ; Chequea que la expresión sea un numero
+                        ; Resta 1 a la expresión
+                        (- exp 1)
+                        ; Sino, retorna error
+                        (eopl:error 'contract-violation "La expresión no es un número: ~s" exp)))
+      (not-prim () (not(true-value? exp)))
+      (length-prim () (string-length exp))
+      (is-vacio-prim ()
+                     (if (vector? exp)
+                         (= (vector-length exp) 0) #f))
+      (is-list-prim () (vector? exp))
+      (cabeza-prim ()
+                   (if (vector? exp)
+                       (if (> (vector-length exp) 0)
+                           (vector-ref exp 0) 'null)             
+                       (eopl:error 'apply-primapp-un "Error: cabeza requiere una lista")))
+      (cola-prim ()
+                 (if (vector? exp)
+                     (if (> (vector-length exp) 0)
+                         (list->vector (cdr (vector->list exp))) (vector))          
+                     (eopl:error 'apply-primapp-un "Error: cola requiere una lista")))
+      (is-dict-prim () (hash? exp))
+      (dict-keys-prim ()
+                  (if (hash? exp)
+                      (list->vector (hash-keys exp))
+                      (eopl:error 'apply-primapp-un "Error: claves requiere un diccionario, recibio: ~s" exp)))
+      (dict-values-prim ()
+                  (if (hash? exp)
+                      (list->vector (hash-values exp))
+                      (eopl:error 'apply-primapp-un "Error: valores requiere un diccionario, recibio: ~s" exp)))
       )
     )
   )
+
+(define apply-primapp-ter
+  (lambda (prim exp1 exp2 exp3)
+    (cases primitive-ter prim
+      ; Primitiva set-list(lst, index, valor)
+      (set-list-prim ()
+                     (if (and (vector? exp1) (integer? exp2))
+                         ; Validamos que el índice exista
+                         (if (and (>= exp2 0) (< exp2 (vector-length exp1)))
+                             (begin
+                               (vector-set! exp1 exp2 exp3) ; Modifica
+                               exp1)                        ; Retorna la lista
+                             (eopl:error 'apply-primapp-ter "Error: Indice ~s fuera de rango" exp2))
+                         (eopl:error 'apply-primapp-ter "Error: set-list requiere una lista y un indice entero")))
+      (set-dict-prim ()
+                      (if (hash? exp1)
+                          (begin (hash-set! exp1 exp2 exp3) exp1)
+                          (eopl:error 'apply-primapp-ter "Error: set-diccionario requiere un diccionario como primer argumento, recibio: ~s" exp1)))
+    )
+  )
+)
 
 ;true-value?: determina si un valor dado corresponde a un valor booleano falso o verdadero
 (define true-value?
@@ -443,15 +620,31 @@
 (define-datatype procval procval?
   (closure
    (ids (list-of symbol?))
-   (body expression?)
+   (body (list-of expression?))
    (env environment?)))
 
-;apply-procedure: evalua el cuerpo de un procedimientos en el ambiente extendido correspondiente
+#|apply-procedure: evalua el cuerpo de un procedimientos en el ambiente extendido correspondiente. 
+Si tiene return devuelve el valor de la expresion return, de otra manera devuelve 'null
+|#
 (define apply-procedure
+  ;recibe una closure y los argumentos
   (lambda (proc args)
     (cases procval proc
+      ;abrimos la closure 
       (closure (ids body env)
-               (eval-expression body (extend-env ids args env))))))
+              ;creamos un nuevo ambiente haciendo binding de los argumentos a los ids
+               (let ((new-env (extend-env ids args env)))
+                ; iteramos sobre el cuerpo de la funcion
+                 (let loop ((exps body))
+                   ; si se acabo el cuerpo y nunca aparecio return devolvemos 'null
+                   (if (null? exps)
+                       'null
+                       ;evaluamos el cadr en el nuevo ambiente
+                       (let ((result (eval-expression (car exps) new-env)))
+                         (if (return-signal? result)
+                             (cases return-signal result
+                               (a-return (val) val))
+                             (loop (cdr exps)))))))))))
 
 ;*******************************************************************************************
 ;Ambientes
@@ -525,9 +718,8 @@
 
 (define expval?
   (lambda (x)
-    ;agregado symbol a expval
-    (or (number? x) (procval? x) (symbol? x) (string? x) (boolean? x))
-    ))
+    ;agregado symbol y vector a expval, tambien se agrego hash 
+    (or (number? x) (procval? x) (symbol? x) (string? x) (boolean? x) (vector? x) (hash? x))))
 
 (define ref-to-direct-target?
   (lambda (x)
@@ -645,3 +837,133 @@ x))  end")
 ;  abc
 ;end
 
+; ((5 * 4) + (10 / 2)) end
+; (true and (5 > 2)) end
+; var x = 10, y = 5; const z = 2; ((x + y) * z) end
+
+; var x = 42; set x = "Ahora soy un texto"; set x = 20; x end
+; var x1 = 10, x2 = 20, x3 = 30; ((x1 + x2) + x3) end
+
+; var edad = 20; if (edad >= 18) then "Eres mayor de edad" else "Eres menor" end
+
+; var miSuma = func (a b) (a + b); [miSuma (10 20)] end
+
+; Lo dejamos así o le quitamos el ; al set?
+; var x = 5; begin set x = 20; ; x end end
+; const c = 10; begin set c = 99; ; c end end
+
+; var test1 = 0, test2 = "null", test3 = "Hola"; if test1 then 1 else 2 end
+; var test1 = 0, test2 = "null", test3 = "Hola"; if test3 then 1 else 2 end
+
+; var x = 2; switch x { case 1 : "Uno" case 2 : "Dos" default : "Ninguno" } end
+;  var color = "rojo"; switch color { case "rojo": print("Detente"); case "amarillo": print("Precaución"); case "verde": print("Sigue"); default: print("Color desconocido"); } end
+
+; (10 % 3) end
+; ("Hola " concat "Mundo") end
+; longitud("MathFlow") end
+
+; var x = 10; var y = 5; if (x > y) then print(true); else print(false); end
+; var a = 10; var b = 5; if ((a > b) and not((b == 0))) then print("a es mayor y b no es cero"); else null end
+
+; var miLista = list(1, "Hola", true, (5 * 2)); print(miLista); end
+
+; var lista = vacio; print(vacio?(lista)); print(vacio?(crear-lista(1, vacio))); end
+; var lista = crear-lista(3, vacio); set lista = crear-lista(2, lista); set lista = crear-lista(1, lista); print(lista); end
+; var a = crear-lista(5, vacio); var b = 42; print(lista?(a)); print(lista?(b)); end
+
+; var lista = crear-lista("A", crear-lista("B", vacio)); print(cabeza(lista)); end
+; var lista = crear-lista(1, crear-lista(2, crear-lista (3, vacio))); print(cola(lista)); end
+; var a = crear-lista(1, crear-lista(2, vacio)); var b = crear-lista(3, crear-lista(4, vacio)); var c = append(a, b); print(c); end
+; var l = crear-lista("a", crear-lista("b", crear-lista("c", vacio))); print(ref-list(l, 1)); end
+; var l = crear-lista("a", crear-lista("b", crear-lista("c", vacio))); print(ref-list(l, 1)); print(ref-list(l, 10)); end
+
+; var l = crear-lista(1, crear-lista(2, crear-lista(3, vacio))); set l = set-list(l, 1, 99); print(l); end
+
+; var valor = 1.0; while (valor < 4.0) do set valor = (valor + 0.1); done print(valor); end
+; var miLista = list(5, 6, 2, 3); for i in miLista do print(i); done end
+
+; var contador = 0; while (contador < 3) do set contador = (contador + 1); done print(contador); end
+; var x = 3; while (x > 0) do begin print(x); ; set x = (x - 1); end done print("Despegue"); end
+; var datos = list("MathFlow", true, 42, vacio); for item in datos do print(item); done end
+; var numeros = list(10, 20, 30); var suma = 0; for n in numeros do set suma = (suma + n); done print(suma); end
+
+
+; crear-diccionario() end
+; crear-diccionario("nombre": "Juanita", "edad": 20) end
+; diccionario?(crear-diccionario()) end
+; diccionario?(5) end
+; var d = crear-diccionario("nombre": "Juanita"); diccionario?(d) end
+; var d = crear-diccionario("nombre": "Juanita", "edad": 20); ref-diccionario(d, "nombre") end
+; var d = crear-diccionario("nombre": "Juanita"); ref-diccionario(d, "edad") end
+; var d = crear-diccionario("edad": 20); ref-diccionario(d, "edad") end
+; var d = list(1,2,3); ref-diccionario(d, "edad") end
+; var d = crear-diccionario(); set-diccionario(d, "nombre", "Juan") end
+; var d = crear-diccionario("edad": 20); set-diccionario(d, "edad", 21) ref-diccionario(d, "edad") end
+; var d = crear-diccionario("nombre": "Juanita", "edad": 20); claves(d) end
+; var d = crear-diccionario("nombre": "Juanita", "edad": 20); valores(d) end
+
+;funciones
+#| 
+func: crea funciones anónimas que pueden guardarse en variables.
+def: declara funciones con nombre, incluyendo funciones recursivas.
+[expFuncion (args...)]: aplica cualquier expresión que evalúe a una función. 
+|#
+; def sumar(a,b) { return (a + b); } [sumar (10 20)] end
+; var doble = func(x) { return (x * 2); }; [doble (5)] end
+; def saludar(nombre) { print(nombre); } [saludar ("Ana")] end
+#|
+def factorial(n) {
+  if (n <= 1) then
+    return 1;
+  else
+    return (n * [factorial ((n - 1))]);
+}
+
+[factorial (5)]
+end
+|#
+#|
+var apply = func(funcion) {
+return [funcion (5)];
+        };
+var doble = func(x) {
+            return (x*x);
+              };
+[apply (doble)];
+end
+|#
+
+;por valor o referencia
+#| var x = 5;
+def cambiar(a) {
+  set a = 99;
+  return a;
+}
+
+[cambiar (x)]
+x
+end
+|#
+#|
+var l = list(1,2,3);
+
+def cambiarLista(lst) {
+  set-list(lst, 1, 99);
+}
+
+[cambiarLista (l)]
+ref-list(l, 1)
+end
+|#
+#|
+var doble = func(x) {
+  return (x * 2);
+};
+
+def aplicar(f, valor) {
+  return [f (valor)];
+}
+
+[aplicar (doble 8)]
+end
+|#
