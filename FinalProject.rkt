@@ -58,6 +58,7 @@
 ;;                     <print-exp (exp)>
 ;;                  ::= crear-diccionario ( {<expression> : <expression>}*(,) )
 ;;                      <dict-exp (keys values)>
+;;                  ::= symbol <identifier>;
 ;;  <primitive-bin> ::= + | - | * | /
 ;;                  ::= < | > | <= | >= | == | !=
 ;;                  ::= and | or
@@ -151,6 +152,8 @@
     ; Diccionarios: { "a": 1, "b": 2 }
     ;(expression ("{" (separated-list identifier ":" expression ",") "}") dict-exp)
     (expression ("crear-diccionario" "(" (separated-list expression ":" expression ",") ")") dict-exp)
+    ; Simbolos de expresiones algebraicas
+    (expression ("symbol" identifier ";") symbol-exp)
 
     ;; Evaluación de expresiones algebraicas
     (expression ("evaluar" "(" expression "," (separated-list identifier "=" expression ",") ")")
@@ -344,7 +347,13 @@
                        (let ((arg1 (eval-expression rand1 env)) 
                          (arg2 (eval-expression rand2 env)))
                        ; Aplica la primitiva con el resultado de evaluar sus expresiones
-                         (apply-primapp-bin arg1 prim arg2)))
+                       ; Si algún argumento evalua a una expresión simbólica, genera una expresión simbólica
+                         (if (or (symb-exp? arg1) (symb-exp? arg2))
+                             (let
+                                 ((arg1 (if (number? arg1) (symb-num arg1) arg1))
+                                  (arg2 (if (number? arg2) (symb-num arg2) arg2)))
+                               (symb-op prim arg1 arg2))
+                             (apply-primapp-bin arg1 prim arg2))))
       (primapp-prefix-bin-exp (prim rand1 rand2)
                               (let ((arg1 (eval-expression rand1 env))
                                     (arg2 (eval-expression rand2 env)))
@@ -381,7 +390,12 @@
       (boolean-exp (exp)
                    (eval-bool exp))
       (print-exp (exp)
-                 (display (eval-expression exp env))
+                 (display (let
+                              ((exp-val (eval-expression exp env)))
+                            (if (symb-exp? exp-val)
+                                (symb-exp->text exp-val)
+                                exp-val)
+                            ))
                  (newline)
                  1)
       (switch-exp (base-exp cases-exps bodies-exps default-exp)
@@ -427,7 +441,10 @@
                                   (list name)
                                   (list ids)
                                   (list body)
-                                env)) (else exp))))
+                                env))
+      (symbol-exp (id)
+                  (extend-env (list id) (list (direct-target (symb-var id))) env))
+      (else exp))))
 
 ; funciones auxiliares para aplicar eval-expression a cada elemento de una 
 ; lista de operandos (expresiones)
@@ -579,6 +596,11 @@
   )
 )
 
+
+;*******************************************************************************************
+
+; Funciones Auxiliares
+
 ;true-value?: determina si un valor dado corresponde a un valor booleano falso o verdadero
 (define true-value?
   (lambda (x)
@@ -590,7 +612,7 @@
       ((eqv? x 'null) #f)      
       (else #t))))
 
-;
+;is-comparable?: determina si un valor es comparable
 (define is-comparable?
   (lambda (exp)
     (or (number? exp) (symbol? exp) (string? exp))
@@ -614,6 +636,13 @@
     "true"
     "false"))
   )
+
+;is-symbol-exp?: Determina si una expresión es una expresión simbólica 
+(define is-symbol-exp?
+  (lambda (exp)
+    (cases expression exp
+      (symbol-exp (id) #t)
+      (else #f))))
 
 ;*******************************************************************************************
 ;Procedimientos
@@ -696,11 +725,7 @@ Si tiene return devuelve el valor de la expresion return, de otra manera devuelv
 ;función que busca un símbolo en un ambiente
 (define apply-env
   (lambda (env sym)
-    ;(begin
-     ; (display env)
-      ;(display "jajajaj ")
       (deref (apply-env-ref env sym))))
-    ;)
 
 (define apply-env-ref
   (lambda (env sym)
@@ -719,7 +744,7 @@ Si tiene return devuelve el valor de la expresion return, de otra manera devuelv
 (define expval?
   (lambda (x)
     ;agregado symbol y vector a expval, tambien se agrego hash 
-    (or (number? x) (procval? x) (symbol? x) (string? x) (boolean? x) (vector? x) (hash? x))))
+    (or (number? x) (procval? x) (symbol? x) (string? x) (boolean? x) (vector? x) (hash? x) (symb-exp? x))))
 
 (define ref-to-direct-target?
   (lambda (x)
@@ -750,6 +775,7 @@ Si tiene return devuelve el valor de la expresion return, de otra manera devuelv
       (a-ref (pos vec)
              (vector-ref vec pos)))))
 
+
 (define setref!
   (lambda (ref expval)
     (let
@@ -770,6 +796,50 @@ Si tiene return devuelve el valor de la expresion return, de otra manera devuelv
     (cases reference ref
       (a-ref (pos vec)
              (vector-set! vec pos val)))))
+
+;*******************************************************************************************
+;Expresiones Simbólicas
+
+(define-datatype symb-exp symb-exp?
+  (symb-var (id symbol?))
+  (symb-num (datum number?))
+  (symb-op (rand primitive-bin?)
+           (rator1 symb-exp?)
+           (rator2 symb-exp?)
+           )
+  )
+
+(define symb-exp->text
+  (lambda (exp)
+    (cases symb-exp exp
+      (symb-var (id) (symbol->string id))
+      (symb-num (datum) (number->string datum))
+      (symb-op  (rand rator1 rator2)
+                (string-append "("
+                               (symb-exp->text rator1)
+                               (primapp-bin->text rand)
+                               (symb-exp->text rator2)
+                               ")"
+                               )
+                ))))
+
+
+(define primapp-bin->text
+  (lambda (prim)
+    ; Cases para aplicar según la variante de primitiva binaria
+    (cases primitive-bin prim
+      ; Primitiva suma
+      (add-prim () "+")
+      ; Primitiva resta
+      (substract-prim () "-")
+      ; Primitiva división
+      (div-prim () "/")
+      ; Primitiva multiplicación
+      (mult-prim () "*")
+      (else "")
+      )
+    )
+  )
 
 ;****************************************************************************************
 ;Funciones Auxiliares
@@ -965,5 +1035,26 @@ def aplicar(f, valor) {
 }
 
 [aplicar (doble 8)]
+end
+|#
+
+;; Expresiones algebraicas
+
+#|
+symbol x;
+symbol z;
+print(x + z);
+end
+|#
+#|
+symbol x;
+symbol y;
+var z = 5;
+var c = (x+ (y+3));
+var d = (x * (y + z));
+var e = (x - (2 + z));
+print(c);
+print(d);
+print(e);
 end
 |#
