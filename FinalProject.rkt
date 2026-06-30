@@ -141,16 +141,10 @@
     (expression ("while" expression "do" expression "done") while-exp)
     (expression ("for" identifier "in" expression "do" expression "done")for-exp)
 
-    ;; Paradigma funcional
-    ;; Por ahora, pero falta mejorar la definición de funciones
-    ;(expression ("func" identifier "(" (separated-list identifier ",") ")" "{" expression "}") func-exp)
-    ;(expression ("return" expression) return-exp)
-
     ;; Estructuras mutables
     ; Listas: [1, 2, 3]
     (expression ("list" "(" (separated-list expression ",") ")") list-exp)
     ; Diccionarios: { "a": 1, "b": 2 }
-    ;(expression ("{" (separated-list identifier ":" expression ",") "}") dict-exp)
     (expression ("crear-diccionario" "(" (separated-list expression ":" expression ",") ")") dict-exp)
     ; Simbolos de expresiones algebraicas
     (expression ("symbol" identifier ";") symbol-exp)
@@ -158,6 +152,8 @@
     ;; Evaluación de expresiones algebraicas
     (expression ("evaluar" "(" expression "," (separated-list identifier "=" expression ",") ")")
                 eval-exp)
+
+    ;; Primitivas
     (primitive-bin ("+") add-prim)
     (primitive-bin ("-") substract-prim)
     (primitive-bin ("*") mult-prim)
@@ -192,7 +188,7 @@
     (primitive-un ("lista?") is-list-prim)
     (primitive-un ("cabeza") cabeza-prim)
     (primitive-un ("cola") cola-prim)
-    ;(primitive ("simplificar") simplify-prim)
+    (primitive-un ("simplificar") simplify-prim)
 
     ; Dictionaries primitives
     (primitive-un ("diccionario?") is-dict-prim)
@@ -444,7 +440,21 @@
                                 env))
       (symbol-exp (id)
                   (extend-env (list id) (list (direct-target (symb-var id))) env))
+      (eval-exp (exp-to-eval ids rhs-exps)
+                (let ((target-val (eval-expression exp-to-eval env))
+                      (vals (map (lambda (e) (eval-expression e env)) rhs-exps)))
+                  (if (symb-exp? target-val)
+                      (let ((original-ast (cases symb-exp target-val
+                                            (symb-var (id) (id-exp id))          
+                                            (symb-num (datum) (numero-exp datum))
+                                            (symb-op (rand rator1 rator2 org-exp) org-exp))))
+                        ; Creamos un ambiente temporal con las variables a reemplazar
+                        (let ((new-env (extend-env ids (map direct-target vals) env)))
+                          (eval-expression original-ast new-env))) ; reevaluamos en el nuevo ambiente
+                      ; Si la expresión no es simbólica devolvemos el valor normal
+                      target-val)))
       (else exp))))
+
 
 ; funciones auxiliares para aplicar eval-expression a cada elemento de una 
 ; lista de operandos (expresiones)
@@ -571,6 +581,10 @@
                   (if (hash? exp)
                       (list->vector (hash-values exp))
                       (eopl:error 'apply-primapp-un "Error: valores requiere un diccionario, recibio: ~s" exp)))
+      (simplify-prim ()
+                     (if (symb-exp? exp)
+                         (simplify-symb exp)
+                         (eopl:error 'apply-primapp-un "Error: simplificar requiere una expresión simbólica, recibió: ~s" exp)))
       )
     )
   )
@@ -842,6 +856,101 @@ Si tiene return devuelve el valor de la expresion return, de otra manera devuelv
     )
   )
 
+(define simplify-symb
+  (lambda (symb)
+    (cases symb-exp symb
+      (symb-var (id) symb)
+      (symb-num (datum) symb)
+      (symb-op (rand rator1 rator2 org)
+               (let ((izq (simplify-symb rator1))
+                     (der (simplify-symb rator2)))
+                 (let ((val-izq (get-symb-val izq))
+                       (val-der (get-symb-val der)))
+                   (cases primitive-bin rand
+                     (add-prim ()
+                               (cond
+                                 ((equal? val-izq 0) der) 
+                                 ((equal? val-der 0) izq) 
+                                 ((and val-izq val-der) (symb-num (+ val-izq val-der))) ; c1 + c2 -> c3
+                                 (else
+                                  (let ((case1
+                                         (cases symb-exp izq
+                                           (symb-op (op-inner r1-inner r2-inner org-inner)
+                                                    (cases primitive-bin op-inner
+                                                      (add-prim ()
+                                                                (let ((val-c1 (get-symb-val r2-inner)))
+                                                                  (if (and val-der val-c1)
+                                                                      (symb-op rand r1-inner (symb-num (+ val-c1 val-der)) org)
+                                                                      #f)))
+                                                      (else #f)))
+                                           (else #f))))
+                                    (if case1
+                                        case1
+                                        (let ((case2
+                                               (cases symb-exp der
+                                                 (symb-op (op-inner r1-inner r2-inner org-inner)
+                                                          (cases primitive-bin op-inner
+                                                            (add-prim ()
+                                                                      (let ((val-c2 (get-symb-val r2-inner)))
+                                                                        (if (and val-izq val-c2)
+                                                                            (symb-op rand (symb-num (+ val-izq val-c2)) r1-inner org)
+                                                                            #f)))
+                                                            (else #f)))
+                                                 (else #f))))
+                                          (if case2
+                                              case2
+                                              ; Si ambos casos fallan devolvemos el árbol original
+                                              (symb-op rand izq der org))))))))
+                     (substract-prim ()
+                               (cond
+                                 ((equal? val-der 0) izq)
+                                 ((and val-izq val-der) (symb-num (- val-izq val-der)))
+                                 (else (symb-op rand izq der org))))
+                     (mult-prim ()
+                                (cond
+                                  ((equal? val-izq 1) der)          
+                                  ((equal? val-der 1) izq)          
+                                  ((equal? val-izq 0) (symb-num 0))
+                                  ((equal? val-der 0) (symb-num 0)) 
+                                  ((and val-izq val-der) (symb-num (* val-izq val-der))) 
+                                  (else
+                                   (let ((case1
+                                          (cases symb-exp izq
+                                            (symb-op (op-inner r1-inner r2-inner org-inner)
+                                                     (cases primitive-bin op-inner
+                                                       (mult-prim ()
+                                                                  (let ((val-c1 (get-symb-val r2-inner)))
+                                                                    (if (and val-der val-c1)
+                                                                        (symb-op rand r1-inner (symb-num (* val-c1 val-der)) org)
+                                                                        #f)))
+                                                       (else #f)))
+                                            (else #f))))
+                                     (if case1
+                                         case1
+                                         (let ((case2
+                                                (cases symb-exp der
+                                                  (symb-op (op-inner r1-inner r2-inner org-inner)
+                                                           (cases primitive-bin op-inner
+                                                             (mult-prim ()
+                                                                        (let ((val-c2 (get-symb-val r2-inner)))
+                                                                          (if (and val-izq val-c2)
+                                                                              (symb-op rand (symb-num (* val-izq val-c2)) r1-inner org)
+                                                                              #f)))
+                                                             (else #f)))
+                                                  (else #f))))
+                                           (if case2
+                                               case2
+                                               (symb-op rand izq der org))))))))
+                     (div-prim ()
+                               (cond
+                                  ((equal? val-der 1) izq)
+                                  ((equal? val-izq 0) (symb-num 0))
+                                  ((and val-izq val-der) (symb-num (/ val-izq val-der)))
+                                  (else (symb-op rand izq der org))))
+                     
+                     ; si es cualquier otra primitiva la dejamos igual
+                     (else (symb-op rand izq der org)))))))))
+
 ;****************************************************************************************
 ;Funciones Auxiliares
 
@@ -865,6 +974,13 @@ Si tiene return devuelve el valor de la expresion return, de otra manera devuelv
               (if (number? list-index-r)
                 (+ list-index-r 1)
                 #f))))))
+
+; función auxiliar para extraer el número de un symb-num
+(define get-symb-val
+  (lambda (exp)
+    (cases symb-exp exp
+      (symb-num (datum) datum)
+      (else #f))))
 
 ;******************************************************************************************
 ;Pruebas
@@ -915,7 +1031,27 @@ x))  end")
 ; var x = 42; set x = "Ahora soy un texto"; set x = 20; x end
 ; var x1 = 10, x2 = 20, x3 = 30; ((x1 + x2) + x3) end
 
+;; if ... then ... else ... end
 ; var edad = 20; if (edad >= 18) then "Eres mayor de edad" else "Eres menor" end
+; var edad = 20; if (edad >= 18) then print("Mayor de edad"); else print("Menor de edad") ;end
+; var x = 10; var y = 5; if (x > y) then print(true); else print(false); end
+; var a = 10; var b = 5; if ((a > b) and not((b == 0))) then print("a es mayor y b no es cero"); else null end
+; var edad = 12; if (edad < 13) then print("Nino"); else if (edad < 18) then print("Adolescente"); else print("Adulto"); end
+
+;; switch
+; var x = 2; switch x { case 1 : "Uno" case 2 : "Dos" default : "Ninguno" } end
+; var color = "rojo"; switch color { case "rojo": print("Detente"); case "amarillo": print("Precaución"); case "verde": print("Sigue"); default: print("Color desconocido"); } end
+
+;; while ... do ... done
+; var valor = 1.0; while (valor < 4.0) do set valor = (valor + 0.1); done print(valor); end
+; var contador = 0; while (contador < 3) do set contador = (contador + 1); done print(contador); end
+; var x = 3; while (x > 0) do begin print(x); ; set x = (x - 1); end done print("Despegue"); end
+
+;; for ... in ... do ... done
+; var miLista = list(5, 6, 2, 3); for i in miLista do print(i); done end
+; var datos = list("MathFlow", true, 42, vacio); for item in datos do print(item); done end
+; var numeros = list(10, 20, 30); var suma = 0; for n in numeros do set suma = (suma + n); done print(suma); end
+
 
 ; var miSuma = func (a b) (a + b); [miSuma (10 20)] end
 
@@ -926,37 +1062,22 @@ x))  end")
 ; var test1 = 0, test2 = "null", test3 = "Hola"; if test1 then 1 else 2 end
 ; var test1 = 0, test2 = "null", test3 = "Hola"; if test3 then 1 else 2 end
 
-; var x = 2; switch x { case 1 : "Uno" case 2 : "Dos" default : "Ninguno" } end
-;  var color = "rojo"; switch color { case "rojo": print("Detente"); case "amarillo": print("Precaución"); case "verde": print("Sigue"); default: print("Color desconocido"); } end
-
 ; (10 % 3) end
 ; ("Hola " concat "Mundo") end
 ; longitud("MathFlow") end
 
-; var x = 10; var y = 5; if (x > y) then print(true); else print(false); end
-; var a = 10; var b = 5; if ((a > b) and not((b == 0))) then print("a es mayor y b no es cero"); else null end
 
+;; Listas
 ; var miLista = list(1, "Hola", true, (5 * 2)); print(miLista); end
-
 ; var lista = vacio; print(vacio?(lista)); print(vacio?(crear-lista(1, vacio))); end
 ; var lista = crear-lista(3, vacio); set lista = crear-lista(2, lista); set lista = crear-lista(1, lista); print(lista); end
 ; var a = crear-lista(5, vacio); var b = 42; print(lista?(a)); print(lista?(b)); end
-
 ; var lista = crear-lista("A", crear-lista("B", vacio)); print(cabeza(lista)); end
 ; var lista = crear-lista(1, crear-lista(2, crear-lista (3, vacio))); print(cola(lista)); end
 ; var a = crear-lista(1, crear-lista(2, vacio)); var b = crear-lista(3, crear-lista(4, vacio)); var c = append(a, b); print(c); end
 ; var l = crear-lista("a", crear-lista("b", crear-lista("c", vacio))); print(ref-list(l, 1)); end
 ; var l = crear-lista("a", crear-lista("b", crear-lista("c", vacio))); print(ref-list(l, 1)); print(ref-list(l, 10)); end
-
 ; var l = crear-lista(1, crear-lista(2, crear-lista(3, vacio))); set l = set-list(l, 1, 99); print(l); end
-
-; var valor = 1.0; while (valor < 4.0) do set valor = (valor + 0.1); done print(valor); end
-; var miLista = list(5, 6, 2, 3); for i in miLista do print(i); done end
-
-; var contador = 0; while (contador < 3) do set contador = (contador + 1); done print(contador); end
-; var x = 3; while (x > 0) do begin print(x); ; set x = (x - 1); end done print("Despegue"); end
-; var datos = list("MathFlow", true, 42, vacio); for item in datos do print(item); done end
-; var numeros = list(10, 20, 30); var suma = 0; for n in numeros do set suma = (suma + n); done print(suma); end
 
 
 ; crear-diccionario() end
@@ -972,6 +1093,8 @@ x))  end")
 ; var d = crear-diccionario("edad": 20); set-diccionario(d, "edad", 21) ref-diccionario(d, "edad") end
 ; var d = crear-diccionario("nombre": "Juanita", "edad": 20); claves(d) end
 ; var d = crear-diccionario("nombre": "Juanita", "edad": 20); valores(d) end
+; var pacientes = crear-diccionario("id": 101, "nombre": "Carlos", "diagnostico": "Hipertension"); claves(pacientes) end
+; var pacientes = crear-diccionario("id": 101, "nombre": "Carlos", "diagnostico": "Hipertension"); valores(pacientes) end
 
 ;funciones
 #| 
@@ -1038,6 +1161,23 @@ def aplicar(f, valor) {
 [aplicar (doble 8)]
 end
 |#
+#|
+def cuadrado(x) {
+  return (x * x);
+}
+print([cuadrado (4)]);
+end
+|#
+#|
+def fib(n) {
+  if (n <= 1) then
+    return n;
+  else
+    return ([fib ((n - 1))] + [fib ((n - 2))]);
+}
+print([fib (6)]);
+end
+|#
 
 ;; Expresiones algebraicas
 
@@ -1057,5 +1197,38 @@ var e = (x - (2 + z));
 print(c);
 print(d);
 print(e);
+end
+|#
+
+; symbol x; var expr = (x + 3); print(evaluar(expr, x=5)); end
+; symbol x; var expr = (((x*x) + (3*x)) + 1); print(evaluar(expr, x=2)); end
+; symbol x; symbol y; var expr = ((x*y) + 2); print(evaluar(expr, x=3, y=4)); end
+; symbol x; symbol y; var expr = ((x*y) + 2); print(evaluar(expr, x=3)); end
+
+; symbol x; print(simplificar((x + 0))); end
+; symbol x; print(simplificar(((x * 1) + 0))); end
+
+#|
+symbol x;
+var y = ((x + 2) + 3);
+print(simplificar(y));
+end
+|#
+
+#|
+symbol x;
+print(simplificar(((x * 0) + 10)));
+end
+|#
+
+#|
+symbol x;
+print(simplificar(((x * 5) * 6)));
+end
+|#
+
+#|
+symbol x;
+print(simplificar((((x + 0) * 1) + (2 + 3))));
 end
 |#
