@@ -352,7 +352,7 @@
                              (let
                                  ((arg1 (if (number? arg1) (symb-num arg1) arg1))
                                   (arg2 (if (number? arg2) (symb-num arg2) arg2)))
-                               (symb-op prim arg1 arg2))
+                               (symb-op prim arg1 arg2 exp))
                              (apply-primapp-bin arg1 prim arg2))))
       (primapp-prefix-bin-exp (prim rand1 rand2)
                               (let ((arg1 (eval-expression rand1 env))
@@ -806,6 +806,7 @@ Si tiene return devuelve el valor de la expresion return, de otra manera devuelv
   (symb-op (rand primitive-bin?)
            (rator1 symb-exp?)
            (rator2 symb-exp?)
+           (org-exp expression?)
            )
   )
 
@@ -814,7 +815,7 @@ Si tiene return devuelve el valor de la expresion return, de otra manera devuelv
     (cases symb-exp exp
       (symb-var (id) (symbol->string id))
       (symb-num (datum) (number->string datum))
-      (symb-op  (rand rator1 rator2)
+      (symb-op  (rand rator1 rator2 exp)
                 (string-append "("
                                (symb-exp->text rator1)
                                (primapp-bin->text rand)
