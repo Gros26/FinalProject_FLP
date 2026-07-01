@@ -157,7 +157,7 @@
     ;; Estructuras de control
     (expression ("if" expression "then" expression "else" expression)
                 if-exp)
-    (expression ("begin" expression (arbno ";" expression) "end")
+    (expression ("begin" expression (arbno expression) "end")
                 begin-exp)
     ;(expression ("begin" (separated-list expression ";") "end") begin-exp)
     (expression ("switch" expression "{" (arbno "case" expression ":" expression) "default" ":" expression "}") switch-exp)
@@ -399,13 +399,19 @@
                      (eopl:error 'eval-expression
                                  "Attempt to apply non-procedure ~s" proc))))
       (begin-exp (exp exps)
-                 (let loop ((acc (eval-expression exp env))
-                             (exps exps))
-                    (if (null? exps) 
-                        acc
-                        (loop (eval-expression (car exps) 
-                                               env)
-                              (cdr exps)))))
+                (let loop ((exps (cons exp exps))
+                          (current-env env)
+                          (last-val 'null))
+                  (if (null? exps)
+                      last-val
+                      (let ((result (eval-expression (car exps) current-env)))
+                        (cond
+                          ((return-signal? result)
+                          result)
+                          ((environment? result)
+                          (loop (cdr exps) result last-val))
+                          (else
+                          (loop (cdr exps) current-env result)))))))
       (boolean-exp (exp)
                    (eval-bool exp))
       (print-exp (exp)
@@ -431,26 +437,39 @@
                 (let ((vals (map (lambda (e) (eval-expression e env)) exps)))
                   (list->vector vals)))
       (while-exp (test-exp body-exp)
-                 (let loop () ; Iniciamos un ciclo recursivo infinito
-                   (if (true-value? (eval-expression test-exp env)) ; Evaluamos la condición
-                       (begin
-                         (eval-expression body-exp env)             ; Si es true, entonces evaluamos el cuerpo
-                         (loop))                                    ; Luego se vuelve a llamar al ciclo
-                       'null)))
+                (let loop ((current-env env))
+                  (if (true-value? (eval-expression test-exp current-env))
+                      (let ((result (eval-expression body-exp current-env)))
+                        (cond
+                          ((return-signal? result)
+                          result)
+
+                          ((environment? result)
+                          (loop result))
+
+                          (else
+                          (loop current-env))))
+                      'null)))
       (for-exp (id list-exp body-exp)
-               (let ((lst (eval-expression list-exp env)))          ; Evaluamos la lista iterable
-                 (if (vector? lst)                                  
-                     (let loop ((i 0))                              
-                       (if (< i (vector-length lst))               
-                           (begin
-                             ; Evaluamos el cuerpo en un amb. extendido
-                             (eval-expression body-exp 
-                                              (extend-env (list id) 
-                                                          (list (direct-target (vector-ref lst i))) 
-                                                          env))
-                             (loop (+ i 1)))                       
-                           'null))                                  
-                     (eopl:error 'eval-expression "Error: el ciclo for exige una lista, recibio: ~s" lst))))
+                  (let ((lst (eval-expression list-exp env)))
+                    (if (vector? lst)
+                        (let loop ((i 0)
+                                  (current-env env))
+                          (if (< i (vector-length lst))
+                              (let* ((iter-env (extend-env (list id)
+                                                          (list (direct-target (vector-ref lst i)))
+                                                          current-env))
+                                    (result (eval-expression body-exp iter-env)))
+                                (cond
+                                  ((return-signal? result)
+                                  result)
+                                  ((environment? result)
+                                  (loop (+ i 1) result))
+                                  (else
+                                  (loop (+ i 1) current-env))))
+                              'null))
+                        (eopl:error 'eval-expression
+                                    "Error: el ciclo for exige una lista, recibio: ~s" lst))))
       (dict-exp (keys values)
                 (let ((eval-keys (map (lambda (k) (eval-expression k env)) keys))
                       (eval-values (map (lambda (v) (eval-expression v env)) values)))
@@ -693,24 +712,23 @@
 Si tiene return devuelve el valor de la expresion return, de otra manera devuelve 'null
 |#
 (define apply-procedure
-  ;recibe una closure y los argumentos
   (lambda (proc args)
     (cases procval proc
-      ;abrimos la closure 
       (closure (ids body env)
-              ;creamos un nuevo ambiente haciendo binding de los argumentos a los ids
-               (let ((new-env (extend-env ids args env)))
-                ; iteramos sobre el cuerpo de la funcion
-                 (let loop ((exps body))
-                   ; si se acabo el cuerpo y nunca aparecio return devolvemos 'null
-                   (if (null? exps)
-                       'null
-                       ;evaluamos el cadr en el nuevo ambiente
-                       (let ((result (eval-expression (car exps) new-env)))
-                         (if (return-signal? result)
-                             (cases return-signal result
-                               (a-return (val) val))
-                             (loop (cdr exps)))))))))))
+        (let ((new-env (extend-env ids args env)))
+          (let loop ((exps body)
+                     (current-env new-env))
+            (if (null? exps)
+                'null
+                (let ((result (eval-expression (car exps) current-env)))
+                  (cond
+                    ((return-signal? result)
+                     (cases return-signal result
+                       (a-return (val) val)))
+                    ((environment? result)
+                     (loop (cdr exps) result))
+                    (else
+                     (loop (cdr exps) current-env)))))))))))
 
 ;*******************************************************************************************
 ;Ambientes
@@ -1253,5 +1271,35 @@ end
 #|
 symbol x;
 print(simplificar((((x + 0) * 1) + (2 + 3))));
+end
+|#
+
+
+#|
+;; básico
+var miLista = list(5, 6, 2, 3); for i in miLista do print(i); done end
+;; acumulador con set
+var numeros = list(10, 20, 30); var suma = 0;
+for n in numeros do set suma = (suma + n); done print(suma); end
+;; return dentro de función
+def primero(lst) {
+  for x in lst do return x; done
+}
+[primero (list(9, 8, 7))] end
+;; begin como cuerpo
+for i in list(1, 2, 3) do begin print(i); end done end
+;; lista vacía → null
+for i in vacio do print(i); done end
+
+|#
+
+#|
+begin
+var x = 5;
+var y = 10;
+var z = (x+y);
+print("Suma: ");
+print(z);
+end
 end
 |#
