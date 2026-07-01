@@ -21,13 +21,17 @@
 ;;  <expression>    ::= <identifier>
 ;;                      id-exp (id)
 ;;                  ::= "<text>"
-;;                      cadena (text)
+;;                      cadena-exp (text)
 ;;                  ::= <number>
-;;                      numero (datum)
+;;                      numero-exp (datum)
 ;;                  ::= <bool>
 ;;                      numero (datum)
-;;                  ::= None
-;;                      null ()
+;;                  ::= null
+;;                      null-exp ()
+;;                  ::= vacio
+;;                      vacio-exp ()
+;;                  ::= <bool>
+;;                      boolean-exp (bool)
 ;;                  ::= var <identifier> = <expression> {<identifier> = <expression>}*(,);
 ;;                      var-exp (id exp)
 ;;                  ::= const <identifier> = <expression>;
@@ -36,8 +40,16 @@
 ;;                      <primapp-bin-exp (rand1 prim rand2)>
 ;;                  ::= <primitive-un> (<expression>)
 ;;                      <primapp-un-exp (prim rand)>
+;;                  ::= <primitive-ter> ( <expression> , <expression> , <expression> )
+;;                      primapp-ter-exp (prim exp1 exp2 exp3)
 ;;                  ::= if <expresion> then <expresion> else <expression>
 ;;                      <if-exp (exp1 exp2 exp23)>
+;;                  ::= switch <expression> { {case <expression> : <expression>}* default : <expression> }
+;;                      switch-exp (exp cases default)
+;;                  ::= while <expression> do <expression> done
+;;                      while-exp (condition body)
+;;                  ::= for <identifier> in <expression> do <expression> done
+;;                      for-exp (id list body)
 ;;                  ::= let {<identifier> = <expression>}* in <expression>
 ;;                      <let-exp (ids rands body)>
 ;;                  ::= func({<identifier>}*(,)) { {<expression>}* }
@@ -56,14 +68,25 @@
 ;;                     <set-exp (id rhsexp)>
 ;;                  ::= print ( <expression> );
 ;;                     <print-exp (exp)>
-;;                  ::= crear-diccionario ( {<expression> : <expression>}*(,) )
-;;                      <dict-exp (keys values)>
+;;                  ::= list ( {<expression>}*(,) )
+;;                     <list-exp (exps)>
 ;;                  ::= symbol <identifier>;
-;;  <primitive-bin> ::= + | - | * | /
+;;                     symbol-exp (id)
+;;                  ::= evaluar ( <expression> , {<identifier> = <expression>}*(,) )
+;;                     eval-exp (exp ids exps)
+;;  <primitive-bin> ::= + | - | * | / | %
 ;;                  ::= < | > | <= | >= | == | !=
 ;;                  ::= and | or
+;;                  ::= concat 
+;;                  ::= crear-lista | append | ref-list
+;;                  ::= ref-diccionario
 ;;  <primitive-un>  ::= add1 | sub1
 ;;                  ::= not
+;;                  ::= vacio? | lista? | cabeza | cola 
+;;                  ::= simplificar
+;;                  ::= diccionario? | claves | valores
+;;  <primitive-ter> ::= set-list 
+;;                  ::= set-diccionario
 ;;  <bool>          ::= true | false
 
 
