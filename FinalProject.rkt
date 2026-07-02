@@ -141,7 +141,7 @@
     (expression (primitive-ter "(" expression "," expression "," expression ")")
                 primapp-ter-exp)
     
-    (expression ("print" "(" expression ")" ";") print-exp)
+    (expression ("print" "(" expression ")") print-exp)
 
     ;funciones
     (expression ("func" "(" (separated-list identifier ",") ")"  "{" (arbno expression) "}") proc-exp)
@@ -346,8 +346,12 @@
       (cadena-exp (txt) (substring txt 1 (- (string-length txt) 1)))
 
       (var-exp (ids rhs-exps)
+               (begin
+                (can-vars-bind? ids env)
                (let ((vals (map (lambda (e) (eval-expression e env)) rhs-exps)))
-                 (extend-env ids (map direct-target vals) env)))
+                 (extend-env ids (map direct-target vals) env))
+               )
+               )
  
       (const-exp (ids rhs-exps)
                  (let ((vals (map (lambda (e) (eval-expression e env)) rhs-exps)))
@@ -492,7 +496,7 @@
                                             (symb-op (rand rator1 rator2 org-exp) org-exp))))
                         ; Creamos un ambiente temporal con las variables a reemplazar
                         (let ((new-env (extend-env ids (map direct-target vals) env)))
-                          (eval-expression original-ast new-env))) ; reevaluamos en el nuevo ambiente
+                          (symb-exp->text (eval-expression original-ast new-env)))) ; reevaluamos en el nuevo ambiente
                       ; Si la expresión no es simbólica devolvemos el valor normal
                       target-val)))
       (else exp))))
@@ -624,9 +628,11 @@
                       (list->vector (hash-values exp))
                       (eopl:error 'apply-primapp-un "Error: valores requiere un diccionario, recibio: ~s" exp)))
       (simplify-prim ()
-                     (if (symb-exp? exp)
-                         (simplify-symb exp)
-                         (eopl:error 'apply-primapp-un "Error: simplificar requiere una expresión simbólica, recibió: ~s" exp)))
+                     (cond
+                       [(symb-exp? exp) (symb-exp->text (simplify-symb exp))]
+                       [(number? exp) exp]
+                       [else (eopl:error 'apply-primapp-un "Error: simplificar requiere una expresión simbólica o numérica, recibió: ~s" exp)]
+                       ))
       )
     )
   )
@@ -793,6 +799,19 @@ Si tiene return devuelve el valor de la expresion return, de otra manera devuelv
                                  (a-ref pos vals)
                                  (apply-env-ref env sym)))))))
 
+; Apply-env sin error para chequear ligadura de ids antes de ligadura con var
+(define safe-apply-env-ref
+  (lambda (env sym)
+    (cases environment env
+      (empty-env-record ()
+                        (a-ref 0 (vector)))
+      (extended-env-record (syms vals env)
+                           (let ((pos (rib-find-position sym syms)))
+                             (if (number? pos)
+                                 (a-ref pos vals)
+                                 (safe-apply-env-ref env sym)))))))
+
+
 ;*******************************************************************************************
 ;Blancos y Referencias
 
@@ -855,6 +874,12 @@ Si tiene return devuelve el valor de la expresion return, de otra manera devuelv
 ;*******************************************************************************************
 ;Expresiones Simbólicas
 
+;Datatype de symbol expresión:
+;Variantes:
+; 1. Simbolo algebraico
+; 2. Constante en expresión algebraica
+; 3. Operación binaria con valores simbólicos
+
 (define-datatype symb-exp symb-exp?
   (symb-var (id symbol?))
   (symb-num (datum number?))
@@ -865,8 +890,12 @@ Si tiene return devuelve el valor de la expresion return, de otra manera devuelv
            )
   )
 
+;symb-exp->text: <symb-exp> -> <string>
+; Convierte una expresión simbólica en un string
 (define symb-exp->text
   (lambda (exp)
+    (if (number? exp)
+        exp
     (cases symb-exp exp
       (symb-var (id) (symbol->string id))
       (symb-num (datum) (number->string datum))
@@ -877,9 +906,11 @@ Si tiene return devuelve el valor de la expresion return, de otra manera devuelv
                                (symb-exp->text rator2)
                                ")"
                                )
-                ))))
+                )))))
 
 
+; primapp-bin-> text: <primitive-bin> -> <string>
+; Transforma una primitiva binaria en su representación en string
 (define primapp-bin->text
   (lambda (prim)
     ; Cases para aplicar según la variante de primitiva binaria
@@ -897,100 +928,105 @@ Si tiene return devuelve el valor de la expresion return, de otra manera devuelv
     )
   )
 
+
+; simply-symb:
+; Aplica las reglas de simplificación y retorna una expresión simbólica simplificada
 (define simplify-symb
   (lambda (symb)
-    (cases symb-exp symb
-      (symb-var (id) symb)
-      (symb-num (datum) symb)
-      (symb-op (rand rator1 rator2 org)
-               (let ((izq (simplify-symb rator1))
-                     (der (simplify-symb rator2)))
-                 (let ((val-izq (get-symb-val izq))
-                       (val-der (get-symb-val der)))
-                   (cases primitive-bin rand
-                     (add-prim ()
-                               (cond
-                                 ((equal? val-izq 0) der) 
-                                 ((equal? val-der 0) izq) 
-                                 ((and val-izq val-der) (symb-num (+ val-izq val-der))) ; c1 + c2 -> c3
-                                 (else
-                                  (let ((case1
-                                         (cases symb-exp izq
-                                           (symb-op (op-inner r1-inner r2-inner org-inner)
-                                                    (cases primitive-bin op-inner
-                                                      (add-prim ()
-                                                                (let ((val-c1 (get-symb-val r2-inner)))
-                                                                  (if (and val-der val-c1)
-                                                                      (symb-op rand r1-inner (symb-num (+ val-c1 val-der)) org)
-                                                                      #f)))
-                                                      (else #f)))
-                                           (else #f))))
-                                    (if case1
-                                        case1
-                                        (let ((case2
-                                               (cases symb-exp der
-                                                 (symb-op (op-inner r1-inner r2-inner org-inner)
-                                                          (cases primitive-bin op-inner
-                                                            (add-prim ()
-                                                                      (let ((val-c2 (get-symb-val r2-inner)))
-                                                                        (if (and val-izq val-c2)
-                                                                            (symb-op rand (symb-num (+ val-izq val-c2)) r1-inner org)
+    (if (number? symb)
+        symb
+        (cases symb-exp symb
+          (symb-var (id) symb)
+          (symb-num (datum) symb)
+          (symb-op (rand rator1 rator2 org)
+                   (let ((izq (simplify-symb rator1))
+                         (der (simplify-symb rator2)))
+                     (let ((val-izq (get-symb-val izq))
+                           (val-der (get-symb-val der)))
+                       (cases primitive-bin rand
+                         (add-prim ()
+                                   (cond
+                                     ((equal? val-izq 0) der) 
+                                     ((equal? val-der 0) izq) 
+                                     ((and val-izq val-der) (symb-num (+ val-izq val-der))) ; c1 + c2 -> c3
+                                     (else
+                                      (let ((case1
+                                             (cases symb-exp izq
+                                               (symb-op (op-inner r1-inner r2-inner org-inner)
+                                                        (cases primitive-bin op-inner
+                                                          (add-prim ()
+                                                                    (let ((val-c1 (get-symb-val r2-inner)))
+                                                                      (if (and val-der val-c1)
+                                                                          (symb-op rand r1-inner (symb-num (+ val-c1 val-der)) org)
+                                                                          #f)))
+                                                          (else #f)))
+                                               (else #f))))
+                                        (if case1
+                                            case1
+                                            (let ((case2
+                                                   (cases symb-exp der
+                                                     (symb-op (op-inner r1-inner r2-inner org-inner)
+                                                              (cases primitive-bin op-inner
+                                                                (add-prim ()
+                                                                          (let ((val-c2 (get-symb-val r2-inner)))
+                                                                            (if (and val-izq val-c2)
+                                                                                (symb-op rand (symb-num (+ val-izq val-c2)) r1-inner org)
+                                                                                #f)))
+                                                                (else #f)))
+                                                     (else #f))))
+                                              (if case2
+                                                  case2
+                                                  ; Si ambos casos fallan devolvemos el árbol original
+                                                  (symb-op rand izq der org))))))))
+                         (substract-prim ()
+                                         (cond
+                                           ((equal? val-der 0) izq)
+                                           ((and val-izq val-der) (symb-num (- val-izq val-der)))
+                                           (else (symb-op rand izq der org))))
+                         (mult-prim ()
+                                    (cond
+                                      ((equal? val-izq 1) der)          
+                                      ((equal? val-der 1) izq)          
+                                      ((equal? val-izq 0) (symb-num 0))
+                                      ((equal? val-der 0) (symb-num 0)) 
+                                      ((and val-izq val-der) (symb-num (* val-izq val-der))) 
+                                      (else
+                                       (let ((case1
+                                              (cases symb-exp izq
+                                                (symb-op (op-inner r1-inner r2-inner org-inner)
+                                                         (cases primitive-bin op-inner
+                                                           (mult-prim ()
+                                                                      (let ((val-c1 (get-symb-val r2-inner)))
+                                                                        (if (and val-der val-c1)
+                                                                            (symb-op rand r1-inner (symb-num (* val-c1 val-der)) org)
                                                                             #f)))
-                                                            (else #f)))
-                                                 (else #f))))
-                                          (if case2
-                                              case2
-                                              ; Si ambos casos fallan devolvemos el árbol original
-                                              (symb-op rand izq der org))))))))
-                     (substract-prim ()
-                               (cond
-                                 ((equal? val-der 0) izq)
-                                 ((and val-izq val-der) (symb-num (- val-izq val-der)))
-                                 (else (symb-op rand izq der org))))
-                     (mult-prim ()
-                                (cond
-                                  ((equal? val-izq 1) der)          
-                                  ((equal? val-der 1) izq)          
-                                  ((equal? val-izq 0) (symb-num 0))
-                                  ((equal? val-der 0) (symb-num 0)) 
-                                  ((and val-izq val-der) (symb-num (* val-izq val-der))) 
-                                  (else
-                                   (let ((case1
-                                          (cases symb-exp izq
-                                            (symb-op (op-inner r1-inner r2-inner org-inner)
-                                                     (cases primitive-bin op-inner
-                                                       (mult-prim ()
-                                                                  (let ((val-c1 (get-symb-val r2-inner)))
-                                                                    (if (and val-der val-c1)
-                                                                        (symb-op rand r1-inner (symb-num (* val-c1 val-der)) org)
-                                                                        #f)))
-                                                       (else #f)))
-                                            (else #f))))
-                                     (if case1
-                                         case1
-                                         (let ((case2
-                                                (cases symb-exp der
-                                                  (symb-op (op-inner r1-inner r2-inner org-inner)
-                                                           (cases primitive-bin op-inner
-                                                             (mult-prim ()
-                                                                        (let ((val-c2 (get-symb-val r2-inner)))
-                                                                          (if (and val-izq val-c2)
-                                                                              (symb-op rand (symb-num (* val-izq val-c2)) r1-inner org)
-                                                                              #f)))
-                                                             (else #f)))
-                                                  (else #f))))
-                                           (if case2
-                                               case2
-                                               (symb-op rand izq der org))))))))
-                     (div-prim ()
-                               (cond
-                                  ((equal? val-der 1) izq)
-                                  ((equal? val-izq 0) (symb-num 0))
-                                  ((and val-izq val-der) (symb-num (/ val-izq val-der)))
-                                  (else (symb-op rand izq der org))))
+                                                           (else #f)))
+                                                (else #f))))
+                                         (if case1
+                                             case1
+                                             (let ((case2
+                                                    (cases symb-exp der
+                                                      (symb-op (op-inner r1-inner r2-inner org-inner)
+                                                               (cases primitive-bin op-inner
+                                                                 (mult-prim ()
+                                                                            (let ((val-c2 (get-symb-val r2-inner)))
+                                                                              (if (and val-izq val-c2)
+                                                                                  (symb-op rand (symb-num (* val-izq val-c2)) r1-inner org)
+                                                                                  #f)))
+                                                                 (else #f)))
+                                                      (else #f))))
+                                               (if case2
+                                                   case2
+                                                   (symb-op rand izq der org))))))))
+                         (div-prim ()
+                                   (cond
+                                     ((equal? val-der 1) izq)
+                                     ((equal? val-izq 0) (symb-num 0))
+                                     ((and val-izq val-der) (symb-num (/ val-izq val-der)))
+                                     (else (symb-op rand izq der org))))
                      
-                     ; si es cualquier otra primitiva la dejamos igual
-                     (else (symb-op rand izq der org)))))))))
+                         ; si es cualquier otra primitiva la dejamos igual
+                         (else (symb-op rand izq der org))))))))))
 
 ;****************************************************************************************
 ;Funciones Auxiliares
@@ -1023,6 +1059,29 @@ Si tiene return devuelve el valor de la expresion return, de otra manera devuelv
       (symb-num (datum) datum)
       (else #f))))
 
+; función auxiliar para probar ligadura de variables y chequear si son simbolicas
+(define can-vars-bind?
+  (lambda (vars env)
+    (if (null? vars)
+        #t
+        (and (can-var-bind? (car vars) env) (can-vars-bind? (cdr vars) env))
+        )
+        ))
+
+(define can-var-bind?
+  (lambda (var env)
+    (let
+        ((referenced (safe-apply-env-ref env var)))
+    (cases reference referenced
+                        (a-ref (pos vec)
+                               (cond
+                                 [(zero? (vector-length vec)) #t]
+                                 [(if (symb-exp? (deref referenced))
+                                      (eopl:error 'var-exp "Attempted to assign value to a symbol ~s"var)
+                                      #t)]
+                                 )
+                               )
+                        ))))
 ;******************************************************************************************
 ;Pruebas
 
@@ -1220,7 +1279,7 @@ print([fib (6)]);
 end
 |#
 
-;; Expresiones algebraicas
+;; Expresiones simbólicas
 
 #|
 symbol x;
