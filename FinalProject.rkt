@@ -107,10 +107,11 @@
   (number
    ("-" digit (arbno digit)) number)
   ;; Números flotantes
+  
   (number
-   (digit "." (arbno digit)) number)
+   (digit (arbno digit) "." (arbno digit)) number)
   (number
-   ("-" digit "." (arbno digit)) number)
+   ("-" digit (arbno digit) "." (arbno digit)) number)
   ;; Cadenas de caracteres
   (string-text
    ("\"" (arbno (not #\")) "\"") string)
@@ -562,7 +563,7 @@
       (not-equal-prim () (not(equal? exp1 exp2)))
       (and-prim () (and (true-value? exp1) (true-value? exp2)))
       (or-prim () (or (true-value? exp1) (true-value? exp2)))
-      (mod-prim () (modulo exp1 exp2))
+      (mod-prim () (modulo-universal exp1 exp2))
       (concat-prim () (string-append exp1 exp2))
       (crear-lista-prim ()
                         (if (vector? exp2) 
@@ -1031,6 +1032,12 @@ Si tiene return devuelve el valor de la expresion return, de otra manera devuelv
 ;****************************************************************************************
 ;Funciones Auxiliares
 
+; función auxiliar para calcular el módulo soportando flotantes
+(define (modulo-universal a b)
+  (if (and (integer? a) (integer? b))
+      (modulo a b)
+      (- a (* b (truncate (/ a b))))))
+
 ; funciones auxiliares para encontrar la posición de un símbolo
 ; en la lista de símbolos de un ambiente
 
@@ -1305,31 +1312,31 @@ end
 ; symbol x; symbol y; var expr = ((x*y) + 2); print(evaluar(expr, x=3, y=4)); end
 ; symbol x; symbol y; var expr = ((x*y) + 2); print(evaluar(expr, x=3)); end
 
-; symbol x; print(simplificar((x + 0))); end
-; symbol x; print(simplificar(((x * 1) + 0))); end
+; symbol x; print(simplificar((x + 0))) end
+; symbol x; print(simplificar(((x * 1) + 0))) end
 
 #|
 symbol x;
 var y = ((x + 2) + 3);
-print(simplificar(y));
+print(simplificar(y))
 end
 |#
 
 #|
 symbol x;
-print(simplificar(((x * 0) + 10)));
+print(simplificar(((x * 0) + 10)))
 end
 |#
 
 #|
 symbol x;
-print(simplificar(((x * 5) * 6)));
+print(simplificar(((x * 5) * 6)))
 end
 |#
 
 #|
 symbol x;
-print(simplificar((((x + 0) * 1) + (2 + 3))));
+print(simplificar((((x + 0) * 1) + (2 + 3))))
 end
 |#
 
@@ -1359,6 +1366,154 @@ var y = 10;
 var z = (x+y);
 print("Suma: ");
 print(z);
+end
+end
+|#
+
+;; Da la respuesta en sintaxis abstracta
+#|
+symbol x;
+
+var vInt = 16;
+var vFloat = 5.3456;
+var vNull = null;
+var vString = "Helloo";
+var vBool = true;
+
+var vProcedure = func(n) { 
+  return (n * 4); 
+};
+
+var vList = list(2, 4, 6);
+var vDictionary = crear-diccionario("nombre": "Liseth", "carrera": "Ingenieria en Sistemas");
+
+var vSymbol = x;
+var vExprSimb = (x + 15);
+
+print(list(vInt, vFloat, vNull, vString, vBool, vProcedure, vList, vDictionary, vSymbol, vExprSimb))
+end
+|#
+
+#|
+symbol x;
+
+var vInt = 16;
+var vFloat = 5.3456;
+var vNull = null;
+var vString = "Helloo";
+var vBool = true;
+
+var vProcedure = func(n) { 
+  return (n * 4); 
+};
+
+var vList = list(2, 4, 6);
+var vDictionary = crear-diccionario("nombre": "Liseth", "carrera": "Ingenieria en Sistemas");
+
+var vSymbol = x;
+var vExprSimb = (x + 15);
+
+begin
+  print(vInt)
+  print(vFloat)
+  print(vNull)
+  print(vString)
+  print(vBool)
+  print(vProcedure)
+  print(vList)
+  print(vDictionary)
+  print(vSymbol)
+  print(vExprSimb)
+end
+end
+|#
+
+#|
+begin
+  var X = 17;
+  print(X) 
+  set X = 276;
+  print(X)
+end
+end
+|#
+
+#|
+# Primer programa
+begin
+  const e = 2.71828;
+  print(e)
+end
+end
+
+# Segundo programa
+begin
+  const e = 2.71828;
+  set e = 2.72;
+end
+end
+|#
+
+
+#|
+var int1 = 21;
+var int2 = 16;
+
+var flt1 = 52.5;
+var flt2 = 12.04;
+
+begin
+  print((int1 + int2))
+  print((int1 - int2))
+  print((int1 * int2))
+  print((int1 / int2))
+  print((int1 % int2))
+  print(add1(int1))
+  print(sub1(int2))
+  
+  print((flt1 + flt2))
+  print((flt1 - flt2))
+  print((flt1 * flt2))
+  print((flt1 / flt2))
+  print((flt1 % flt2))
+  print(add1(flt1))
+  print(sub1(flt2))
+end
+end
+|#
+
+#|
+var int1 = 15;
+var int2 = 30;
+
+var flt1 = 12.5;
+var flt2 = 12.5;
+var flt3 = 45.8;
+
+var bool1 = true;
+var bool2 = false;
+
+begin
+  print((int1 < int2))     
+  print((flt3 > flt1))     
+  print((int1 <= flt2))      
+  print((flt1 >= int1))    
+  print((flt1 == flt2))      
+  print((flt3 != flt1))     
+  print((bool1 and bool2)) 
+  print((bool1 or bool2))  
+  print(not(bool2))        
+end
+end
+|#
+
+#|
+var saludo = "Hola ";
+var persona = "profesor";
+
+begin
+  print(concat(saludo, persona))
+  print(longitud(concat(saludo, persona)))
 end
 end
 |#
