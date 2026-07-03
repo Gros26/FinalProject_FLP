@@ -20,6 +20,8 @@
 ;;                      <a-program (exp exps)>
 ;;  <expression>    ::= <identifier>
 ;;                      id-exp (id)
+;;                  ::= &<identifier>
+;;                      dir-id-exp (id)
 ;;                  ::= "<text>"
 ;;                      cadena-exp (text)
 ;;                  ::= <number>
@@ -75,7 +77,7 @@
 ;;                  ::= evaluar ( <expression> , {<identifier> = <expression>}*(,) )
 ;;                     eval-exp (exp ids exps)
 ;;  <primitive-bin> ::= + | - | * | / | %
-;;                  ::= < | > | <= | >= | == | !=
+;;                  ::= < | > | <= | >= | == | <>
 ;;                  ::= and | or
 ;;                  ::= concat 
 ;;                  ::= crear-lista | append | ref-list
@@ -85,6 +87,7 @@
 ;;                  ::= vacio? | lista? | cabeza | cola 
 ;;                  ::= simplificar
 ;;                  ::= diccionario? | claves | valores
+;;                  ::= str
 ;;  <primitive-ter> ::= set-list 
 ;;                  ::= set-diccionario
 ;;  <bool>          ::= true | false
@@ -98,6 +101,8 @@
 (define scanner-spec-simple-interpreter
 '((white-sp
    (whitespace) skip)
+  (white-sp
+    (#\tab) skip)
   (comment
    ("#" (arbno (not #\newline))) skip)
   (identifier
@@ -115,6 +120,8 @@
   ;; Cadenas de caracteres
   (string-text
    ("\"" (arbno (not #\")) "\"") string)
+  (string-text
+   ("“" (arbno (not #\”)) "”") string)
   ;; (string-text (letter (arbno (or letter digit))) symbol)
   ))
 
@@ -124,6 +131,7 @@
   '((program (expression (arbno expression) "end") a-program)
     ;; Datos inmutables
     (expression (identifier) id-exp)
+    (expression ("&" identifier) dir-id-exp)
     (expression (string-text) cadena-exp)
     (expression (number) numero-exp)
     (expression ("null") null-exp)
@@ -175,7 +183,7 @@
 
     ;; Evaluación de expresiones algebraicas
     (expression ("evaluar" "(" expression "," (separated-list identifier "=" expression ",") ")")
-                eval-exp)
+                eval-symb-exp)
 
     ;; Primitivas
     (primitive-bin ("+") add-prim)
@@ -187,7 +195,7 @@
     (primitive-bin (">=") greater-equal-prim)
     (primitive-bin ("<=") less-equal-prim)
     (primitive-bin ("==") equal-prim)
-    (primitive-bin ("!=") not-equal-prim)
+    (primitive-bin ("<>") not-equal-prim)
     (primitive-bin ("and") and-prim)
     (primitive-bin ("or") or-prim)
     (primitive-bin ("%") mod-prim)
@@ -207,6 +215,7 @@
     (primitive-un ("not") not-prim)
     ; String primitive
     (primitive-un ("longitud") length-prim)
+    (primitive-un ("str") str-prim)
     ; List primitives
     (primitive-un ("vacio?") is-vacio-prim)
     (primitive-un ("lista?") is-list-prim)
@@ -223,6 +232,7 @@
 
     ; Dictionaries primitives
     (primitive-ter ("set-diccionario") set-dict-prim)
+
     ))
 
 
@@ -276,7 +286,7 @@
                                   (let
                                       ([result (eval-expression (car exps) current-env)])
                                     (if (environment? result)
-                                        (loop 1 (cdr exps) result)
+                                        (loop "success" (cdr exps) result)
                                         (loop result (cdr exps) current-env)))
                                   )
                               )
@@ -284,7 +294,7 @@
                    (let
                        ([result (eval-expression exp env)])
                      (if (environment? result)
-                         (loop 1 exps result)
+                         (loop "success" exps result)
                          (loop result exps env)))
                    )
                    )
@@ -344,6 +354,7 @@
     (cases expression exp
       (numero-exp (datum) datum)
       (id-exp (id) (apply-env env id))
+      (dir-id-exp (id) (apply-env-ref env id))
       (cadena-exp (txt) (substring txt 1 (- (string-length txt) 1)))
 
       (var-exp (ids rhs-exps)
@@ -414,7 +425,7 @@
                           ((return-signal? result)
                           result)
                           ((environment? result)
-                          (loop (cdr exps) result last-val))
+                          (loop (cdr exps) result 1))
                           (else
                           (loop (cdr exps) current-env result)))))))
       (boolean-exp (exp)
@@ -427,7 +438,7 @@
                                 exp-val)
                             ))
                  (newline)
-                 1)
+                 "print end")
       (switch-exp (base-exp cases-exps bodies-exps default-exp)
                   (let ((base-val (eval-expression base-exp env)))
                     (let loop ((cases cases-exps)
@@ -454,7 +465,7 @@
 
                           (else
                           (loop current-env))))
-                      'null)))
+                      "done")))
       (for-exp (id list-exp body-exp)
                   (let ((lst (eval-expression list-exp env)))
                     (if (vector? lst)
@@ -472,7 +483,7 @@
                                   (loop (+ i 1) result))
                                   (else
                                   (loop (+ i 1) current-env))))
-                              'null))
+                              "done"))
                         (eopl:error 'eval-expression
                                     "Error: el ciclo for exige una lista, recibio: ~s" lst))))
       (dict-exp (keys values)
@@ -487,7 +498,7 @@
                                 env))
       (symbol-exp (id)
                   (extend-env (list id) (list (direct-target (symb-var id))) env))
-      (eval-exp (exp-to-eval ids rhs-exps)
+      (eval-symb-exp (exp-to-eval ids rhs-exps)
                 (let ((target-val (eval-expression exp-to-eval env))
                       (vals (map (lambda (e) (eval-expression e env)) rhs-exps)))
                   (if (symb-exp? target-val)
@@ -634,6 +645,10 @@
                        [(number? exp) exp]
                        [else (eopl:error 'apply-primapp-un "Error: simplificar requiere una expresión simbólica o numérica, recibió: ~s" exp)]
                        ))
+      (str-prim ()
+                (cond
+                  [(number? exp) (number->string exp)]
+                  [(bool? exp) (bool->string exp)]))
       )
     )
   )
@@ -664,6 +679,9 @@
 
 ; Funciones Auxiliares
 
+;bool->string: Convierte el #t y #f en valores de texto
+(define (bool->string b)
+  (if b "true" "false"))
 ;true-value?: determina si un valor dado corresponde a un valor booleano falso o verdadero
 (define true-value?
   (lambda (x)
@@ -789,6 +807,7 @@ Si tiene return devuelve el valor de la expresion return, de otra manera devuelv
   (lambda (env sym)
       (deref (apply-env-ref env sym))))
 
+; función que retorna una referencia a un símbolo en un ambiente
 (define apply-env-ref
   (lambda (env sym)
     (cases environment env
@@ -848,7 +867,10 @@ Si tiene return devuelve el valor de la expresion return, de otra manera devuelv
   (lambda (ref)
     (cases reference ref
       (a-ref (pos vec)
-             (vector-ref vec pos)))))
+             (vector-ref vec pos))
+      )
+    )
+  )
 
 
 (define setref!
