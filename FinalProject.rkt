@@ -508,7 +508,16 @@
                                             (symb-op (rand rator1 rator2 org-exp) org-exp))))
                         ; Creamos un ambiente temporal con las variables a reemplazar
                         (let ((new-env (extend-env ids (map direct-target vals) env)))
-                          (symb-exp->text (eval-expression original-ast new-env)))) ; reevaluamos en el nuevo ambiente
+                          (let
+                              ((new-exp (eval-expression original-ast new-env)))
+                            (if (number? new-exp)
+                                new-exp
+                                (cases symb-exp new-exp
+                                  (symb-var (id) new-exp)
+                                  (symb-num (datum) new-exp )
+                                  (symb-op (rand rator1 rator2 org-exp)
+                                           (symb-op rand rator1 rator2 (symb->exp new-exp)))))))
+                            ) ; reevaluamos en el nuevo ambiente
                       ; Si la expresión no es simbólica devolvemos el valor normal
                       target-val)))
       (else exp))))
@@ -904,7 +913,7 @@ Si tiene return devuelve el valor de la expresion return, de otra manera devuelv
 ; 3. Operación binaria con valores simbólicos
 
 (define-datatype symb-exp symb-exp?
-  (symb-var (id symbol?))
+  (symb-var (id-exp symbol?))
   (symb-num (datum number?))
   (symb-op (rand primitive-bin?)
            (rator1 symb-exp?)
@@ -951,6 +960,22 @@ Si tiene return devuelve el valor de la expresion return, de otra manera devuelv
     )
   )
 
+
+;symb->exp:
+; Retorna una expresión simbólica a su forma de expresión regular
+(define symb->exp
+  (lambda (s-exp)
+    (cases symb-exp s-exp
+      (symb-var (id) (id-exp id))
+      (symb-num (datum) (numero-exp datum))
+      (symb-op (rand rator1 rator2 exp) (primapp-bin-exp
+                                         (symb->exp rator1)
+                                         rand
+                                         (symb->exp rator2))
+               )
+      )
+    )
+  )
 
 ; simply-symb:
 ; Aplica las reglas de simplificación y retorna una expresión simbólica simplificada
@@ -1538,4 +1563,8 @@ begin
   print(longitud(concat(saludo, persona)))
 end
 end
+|#
+
+#|
+
 |#
