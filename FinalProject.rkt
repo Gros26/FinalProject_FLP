@@ -10,9 +10,21 @@
                   hash-keys 
                   hash-values))
 
-;******************************************************************************************
+;*****************************************************************************************
+; Desarrollo Proyecto FLP: Mathflow
+; Equipo de Trabajo:
+; Juan Diego Cárdenas Mejía -- 2416437
+; Liseth Natalia Rivera Cordoba -- 2223510
+; Grosman Klein Garcia Valencia -- 2340247
+; Repositorio GitHub: https://github.com/Gros26/FinalProject_FLP
+
+
 ;;;;; Interpretador para lenguaje con condicionales, ligadura local, procedimientos,
 ;;;;; procedimientos recursivos, ejecución secuencial y asignación de variables
+
+
+;;;;; Valores denotados: Ref(Valores Expresados)
+;;;;; Valores expresado: Enteros + Flotantes +  Booleanos + Nulo + Texto + ProcVal + Listas + Diccionarios + Simbolos + Expresiones_Symb
 
 ;; La definición BNF para las expresiones del lenguaje:
 ;;
@@ -36,7 +48,7 @@
 ;;                      boolean-exp (bool)
 ;;                  ::= var <identifier> = <expression> {<identifier> = <expression>}*(,);
 ;;                      var-exp (id exp)
-;;                  ::= const <identifier> = <expression>;
+;;                  ::= const <identifier> = <expression> {<identifier> = <expression>}*(,);
 ;;                      const-exp (id exp)
 ;;                  ::= (<expression> <primitive-bin> <expression>)
 ;;                      <primapp-bin-exp (rand1 prim rand2)>
@@ -105,14 +117,14 @@
     (#\tab) skip)
   (comment
    ("#" (arbno (not #\newline))) skip)
+  ;; Identificadores
   (identifier
-   (letter (arbno (or letter digit))) symbol)
+   (letter (arbno (or letter digit "_" "?"))) symbol)
   (number
    (digit (arbno digit)) number)
   (number
    ("-" digit (arbno digit)) number)
   ;; Números flotantes
-  
   (number
    (digit (arbno digit) "." (arbno digit)) number)
   (number
@@ -122,7 +134,6 @@
    ("\"" (arbno (not #\")) "\"") string)
   (string-text
    ("“" (arbno (not #\”)) "”") string)
-  ;; (string-text (letter (arbno (or letter digit))) symbol)
   ))
 
 ;Especificación Sintáctica (gramática)
@@ -691,6 +702,7 @@
 ;bool->string: Convierte el #t y #f en valores de texto
 (define (bool->string b)
   (if b "true" "false"))
+
 ;true-value?: determina si un valor dado corresponde a un valor booleano falso o verdadero
 (define true-value?
   (lambda (x)
@@ -1171,6 +1183,11 @@ x))  end")
 
 (interpretador)
 
+
+;************ EJEMPLOS DE USO ************
+
+
+;; Declaración de variables mutables
 ; var abc = 42;
 ;begin
 ;  set abc = "Ahora soy un texto";
@@ -1178,6 +1195,7 @@ x))  end")
 ;  abc
 ;end
 
+;;Primitivas para enteros y flotantes
 ; ((5 * 4) + (10 / 2)) end
 ; (true and (5 > 2)) end
 ; var x = 10, y = 5; const z = 2; ((x + y) * z) end
@@ -1191,6 +1209,8 @@ x))  end")
 ; var x = 10; var y = 5; if (x > y) then print(true); else print(false); end
 ; var a = 10; var b = 5; if ((a > b) and not((b == 0))) then print("a es mayor y b no es cero"); else null end
 ; var edad = 12; if (edad < 13) then print("Nino"); else if (edad < 18) then print("Adolescente"); else print("Adulto"); end
+; var test1 = 0, test2 = "null", test3 = "Hola"; if test1 then 1 else 2 end
+; var test1 = 0, test2 = "null", test3 = "Hola"; if test3 then 1 else 2 end
 
 ;; switch
 ; var x = 2; switch x { case 1 : "Uno" case 2 : "Dos" default : "Ninguno" } end
@@ -1206,16 +1226,12 @@ x))  end")
 ; var datos = list("MathFlow", true, 42, vacio); for item in datos do print(item); done end
 ; var numeros = list(10, 20, 30); var suma = 0; for n in numeros do set suma = (suma + n); done print(suma); end
 
-
-; var miSuma = func (a b) (a + b); [miSuma (10 20)] end
-
-; Lo dejamos así o le quitamos el ; al set?
-; var x = 5; begin set x = 20; ; x end end
+;;begin...end
+; var x = 5; begin set x = 20; x end end
 ; const c = 10; begin set c = 99; ; c end end
 
-; var test1 = 0, test2 = "null", test3 = "Hola"; if test1 then 1 else 2 end
-; var test1 = 0, test2 = "null", test3 = "Hola"; if test3 then 1 else 2 end
 
+;;Primitivas para cadenas de cáracteres
 ; (10 % 3) end
 ; ("Hola " concat "Mundo") end
 ; longitud("MathFlow") end
@@ -1234,6 +1250,7 @@ x))  end")
 ; var l = crear-lista(1, crear-lista(2, crear-lista(3, vacio))); set l = set-list(l, 1, 99); print(l); end
 
 
+;;Diccionarios
 ; crear-diccionario() end
 ; crear-diccionario("nombre": "Juanita", "edad": 20) end
 ; diccionario?(crear-diccionario()) end
@@ -1354,11 +1371,13 @@ print(e);
 end
 |#
 
+;;Evaluación de expresiones simbólicas
 ; symbol x; var expr = (x + 3); print(evaluar(expr, x=5)); end
 ; symbol x; var expr = (((x*x) + (3*x)) + 1); print(evaluar(expr, x=2)); end
 ; symbol x; symbol y; var expr = ((x*y) + 2); print(evaluar(expr, x=3, y=4)); end
 ; symbol x; symbol y; var expr = ((x*y) + 2); print(evaluar(expr, x=3)); end
 
+;;Simplificar expresiones simbólicas
 ; symbol x; print(simplificar((x + 0))) end
 ; symbol x; print(simplificar(((x * 1) + 0))) end
 
@@ -1389,7 +1408,7 @@ end
 
 
 #|
-;; básico
+;; Programación básica
 var miLista = list(5, 6, 2, 3); for i in miLista do print(i); done end
 ;; acumulador con set
 var numeros = list(10, 20, 30); var suma = 0;
@@ -1417,7 +1436,7 @@ end
 end
 |#
 
-;; Da la respuesta en sintaxis abstracta
+;; Dar la respuesta en sintaxis abstracta
 #|
 symbol x;
 
